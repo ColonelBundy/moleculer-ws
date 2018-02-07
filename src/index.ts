@@ -244,7 +244,7 @@ class Client {
    * @param ack 
    */
   private SendResponse(data: moleculer.GenericObject, ack?: number) : Bluebird<{}> {
-    return this.emit('INTERNAL', 'ACK', data, ack);
+    return this.emit(SYS.INTERNAL, SYS.ACK, data, ack);
   }
 }
 
