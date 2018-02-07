@@ -10,7 +10,6 @@ import moleculer  = require('moleculer');
 import uws        = require('uws');
 import timer      = require('nanotimer');
 import _          = require('lodash');
-import httpStatus = require('http-status');
 import nanomatch  = require('nanomatch');
 import shortid    = require('shortid');
 import Bluebird   = require('bluebird');
