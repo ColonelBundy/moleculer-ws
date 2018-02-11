@@ -1,3 +1,9 @@
+/**
+ * Moleculer-ws
+ * Copyright (c) 2018 ColonelBundy (https://github.com/colonelbundy/moleculer-ws)
+ * MIT Licensed
+ */
+
 export class SocketNotOpen extends Error {
   constructor(message = 'Socket not open') {
     super(message)
