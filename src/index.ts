@@ -1,6 +1,6 @@
 /**
  * Moleculer-ws
- * Copyright (c) 2012 ColonelBundy (https://github.com/colonelbundy/moleculer-ws)
+ * Copyright (c) 2018 ColonelBundy (https://github.com/colonelbundy/moleculer-ws)
  * MIT Licensed
  */
 
