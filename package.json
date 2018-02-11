@@ -17,7 +17,6 @@
   "author": "Colonelbundy <colonelbundy@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "async": "^2.6.0",
     "es6-error": "^4.1.1",
     "eventemitter2": "^5.0.1",
     "lodash": "^4.17.4",

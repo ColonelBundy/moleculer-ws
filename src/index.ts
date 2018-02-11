@@ -13,7 +13,6 @@ import _          = require('lodash');
 import nanomatch  = require('nanomatch');
 import shortid    = require('shortid');
 import Bluebird   = require('bluebird');
-import * as async from 'async';
 import { Service, Action, Event, Method } from 'moleculer-decorators';
 import { EventEmitter2 } from 'eventemitter2';
 import { SocketNotOpen, NotAuthorized, RouteNotFound, ClientError, EncodeError, DecodeError, EndpointNotAvailable, ServiceNotAvailable } from './errors';
@@ -23,16 +22,27 @@ interface Flags {
   masked: boolean
 }
 
-export enum SYS {
-  INTERNAL = "INTERNAL",
-  ACK = "ACK",
-  AUTH = "AUTH"
+enum InternalNames {
+  RESPONSE = 'response',
+  CUSTOM = 'custom'
+}
+
+enum InternalActions {
+  AUTH = 'auth',
+  ACK = 'ack'
+}
+
+export enum PacketType {
+  INTERNAL,
+  CUSTOM,
+  SYSTEM
 }
 
 export interface Packet {
-  name: string,
+  name: string | InternalNames,
   action: string,
   data: any,
+  type: PacketType
   ack?: number
 }
 
@@ -80,15 +90,15 @@ export interface route {
   whitelist?: string[],
   authorization?: boolean,
   mappingPolicy?: 'strict' | 'all',
-  onAfterCall?(ctx: moleculer.Context, req: Request, res: any): Promise<moleculer.Context>,
-  onBeforeCall?(ctx: moleculer.Context, req: Request): Promise<moleculer.Context>,
+  onAfterCall?(ctx: moleculer.Context, req: Request, res: any): Bluebird<moleculer.Context>,
+  onBeforeCall?(ctx: moleculer.Context, req: Request): Bluebird<moleculer.Context>,
   callOptions?: callOptions,
   onError?(req, res, err): void
 }
 
-type encryption = (packet: Packet) => Promise<Buffer | string | any>;
-type decryption = (message: Buffer | string | any) => Promise<Packet>;
-type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Promise<Packet>;
+type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
+type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
+type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Bluebird<Packet>;
 
 class Client {
   private readonly server: WSGateway;
@@ -133,20 +143,20 @@ class Client {
    * Send to client
    * @param packet Packet
    */
-  public emit(name: string, action: string, data: moleculer.ActionParams, ack?: number) : Bluebird<{}> {
+  public emit(name: string, action: string, type: PacketType, data: moleculer.ActionParams, ack?: number) : Bluebird<{}> {
     return new Bluebird.Promise(async (resolve, reject) => {
 
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({ name, action, data, ack }).then(result => this.socket.send(result)).catch(reject);
+      this.server.EncodePacket({ name, action, type, data, ack }).then(result => this.socket.send(result)).catch(reject);
     });
   }
 
   /**
    * ResponseCallback
-   * Send response to INTERNAL action
+   * Send response to custom action
    * @param action 
    * @param data 
    * @param ack 
@@ -160,9 +170,9 @@ class Client {
 
       //@TODO return promise and reject on error
       if (err) {
-        _self.SendResponse(new ClientError(err), ack).catch(e => _self.logger.error(e));
+        _self.SendResponse(new ClientError(err), PacketType.CUSTOM, ack).catch(e => _self.logger.error(e));
       } else {
-        _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
+        _self.SendResponse(data, PacketType.CUSTOM, ack).catch(e => _self.logger.error(e));
       }
     }
   }
@@ -174,22 +184,28 @@ class Client {
    */
   private messageHandler(packet: Buffer | string) : void {
     let _ack: number; // To respend if client demanded an ack on their request.
-    this.logger.debug('Incoming message', packet);
-      this.server.DecodePacket(packet).then(({ name, action, data, ack }) => {
-        _ack = ack;
+    let _type: PacketType;
 
-        if (name === SYS.INTERNAL) {
-          if (action === SYS.AUTH) {
+    this.logger.debug('Incoming message', packet);
+      this.server.DecodePacket(packet).then(({ name, action, data, type, ack }) => {
+        _ack = ack;
+        _type = type;
+
+        if (type === PacketType.INTERNAL) { // internal defines that we can all internal method that may or may not be on this particular node.
+          if (action === InternalActions.AUTH) {
             this.logger.debug('Internal auth');
-              if (!this.authorized) {
-                if (this.server.settings.externalAuth) {
-                  return this.server.CallAction(this, name, action, data);
-                } else {
-                  return Bluebird.Promise.method(this.server.methods['authorize'](data));
-                }
+            if (!this.authorized) {
+              if (this.server.settings.externalAuth) {
+                this.logger.debug('External auth method');
+                return this.server.CallAction(this, name, action, data);
+              } else {
+                this.logger.debug('Internal auth method');
+                return Bluebird.Promise.method(this.server.methods.authorize(data));
               }
-          } else {
-            this.logger.debug('Internal custom listener');
+            }
+          }
+        } else if (PacketType.CUSTOM) {
+          this.logger.debug('Custom actions');
 
             /** 
              * Do we actually need both emitters?
@@ -209,13 +225,14 @@ class Client {
             */
             this.server.Emitter.emit(action, data, this, this.ResponseCallback(action, data, ack)); // Add a callback function so we can allow a response
             return Bluebird.Promise.resolve();
-          }
-        } else {
+        } else if (PacketType.SYSTEM) { // System defines that we call a moleculer action
           return this.server.CallAction(this, name, action, data);
+        } else {
+          return new ClientError('Malformed packet'); // Should never reach here unless type is undefined
         }
       }).then((response) => {
         if (_ack && response) {
-          return this.SendResponse(response, _ack);
+          return this.SendResponse(response, _type, _ack);
         }
       }).catch(e => {
         this.logger.error(e);
@@ -229,9 +246,11 @@ class Client {
           error = new ClientError('Malformed packet');
         } else if (e instanceof EncodeError) {
           error = new ClientError('Internal Server Error');
+        } else if (e instanceof ClientError) {
+          error = e;
         }
 
-        return this.SendResponse(error, _ack);
+        return this.SendResponse(error, null, _ack);
       }).catch(e => {
         this.logger.error('Failed to send response', e);
       });
@@ -242,8 +261,8 @@ class Client {
    * @param data 
    * @param ack 
    */
-  private SendResponse(data: moleculer.GenericObject, ack?: number) : Bluebird<{}> {
-    return this.emit(SYS.INTERNAL, SYS.ACK, data, ack);
+  private SendResponse(data: moleculer.GenericObject, type = PacketType.INTERNAL, ack?: number) : Bluebird<{}> {
+    return this.emit(InternalNames.RESPONSE, InternalActions.ACK, type, data, ack);
   }
 }
 
@@ -327,10 +346,10 @@ export class WSGateway {
   started() {
     this.webServer.listen(this.settings.port, this.settings.ip, err => {
       if (err)
-				return this.logger.error("WS Gateway listen error!", err);
+        return this.logger.error("WS Gateway listen error!", err);
 
-        const addr = this.webServer.address();
-        this.logger.info(`WS Gateway listening on ${this.isHTTPS ? "https" : "http"}://${addr.address}:${addr.port}`);
+      const addr = this.webServer.address();
+      this.logger.info(`WS Gateway listening on ${this.isHTTPS ? "https" : "http"}://${addr.address}:${addr.port}`);
     });
 
     if (this.settings.heartbeat.enabled && !this.heartbeatEnabled)
@@ -345,12 +364,12 @@ export class WSGateway {
    */
   stopped() {
     if (this.webServer.listening) {
-      async.series([this.server.close, this.webServer.close], (err) => {
-        if (err)
-					return this.logger.error("WS Gateway close error!", err);
-
-				this.logger.info("WS Gateway stopped!");
-      });
+      Bluebird.all([
+        Bluebird.promisify(this.server.close),
+        Bluebird.promisify(this.webServer.close)
+      ]).then(() => {
+        this.logger.info("WS Gateway stopped!");
+      }).catch(e => this.logger.error("WS Gateway close error!", e));
 		}
   }
 
@@ -401,7 +420,7 @@ export class WSGateway {
   @Method
   public send(id: string, action: string, data: moleculer.GenericObject) {
     this.logger.debug(`Sending to client with id: ${id}`);
-    this.clients.find(c => c.id === id).emit(SYS.INTERNAL, action, data);
+    this.clients.find(c => c.id === id).emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
   }
 
   /**
@@ -414,7 +433,7 @@ export class WSGateway {
   public emit(action: string, data: moleculer.GenericObject) {
     this.logger.debug('Sending to all clients');
     for (let i = 0; i < this.clients.length; i++) {
-      this.clients[i].emit(SYS.INTERNAL, action, data);
+      this.clients[i].emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data);
     }
   }
 
@@ -534,10 +553,6 @@ export class WSGateway {
    */
   @Method
   private ProcessRoute(route: route) : route {
-    if(route.name === SYS.INTERNAL) {
-      throw new Error(`'INTERNAL' route name is reserved, please use something else.`);
-    }
-
     // Check if we have a valid authorization method.
     if (route.authorization) {
       if (!_.isFunction(this.authorization)) {
