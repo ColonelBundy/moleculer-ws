@@ -432,9 +432,7 @@ export class WSGateway {
   @Method
   public emit(action: string, data: moleculer.GenericObject) {
     this.logger.debug('Sending to all clients');
-    for (let i = 0; i < this.clients.length; i++) {
-      this.clients[i].emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data);
-    }
+    this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
   }
 
   /**
