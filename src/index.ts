@@ -337,7 +337,7 @@ export class WSGateway {
       this.StartHeartbeat();
 
     this.server.on('connection', this.ConnectionHandler.bind(this));
-    //this.server.on('error', this.ErrorHandler.bind(this));
+    this.server.on('error', this.logger.error.bind(this));
   }
 
   /**
@@ -365,13 +365,6 @@ export class WSGateway {
     });
     res.end();
   }
-
-  /*@TODO
-  @Method
-  private ErrorHandler(err) {
-    this.logger.error(err);
-  }
-  */
 
   /**
    * StartHeartbeat
