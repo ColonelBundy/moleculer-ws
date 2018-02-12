@@ -119,7 +119,12 @@ class Client {
   public alive: boolean = true;
   public ack_id: 0;
   
-
+  /**
+   * Creates an instance of Client.
+   * @param {uws} _socket 
+   * @param {WSGateway} _server 
+   * @memberof Client
+   */
   constructor(_socket: uws, _server: WSGateway) {
     this.socket = _socket;
     this.server = _server;
@@ -130,8 +135,9 @@ class Client {
   }
 
   /**
-   * Close
    * Close client connection
+   * 
+   * @memberof Client
    */
   public Close() : void {
     if (this.socket.readyState === this.socket.OPEN)
@@ -139,9 +145,14 @@ class Client {
   }
 
   /**
-   * emit
    * Send to client
-   * @param packet Packet
+   * @param {string} name 
+   * @param {string} action 
+   * @param {PacketType} type 
+   * @param {moleculer.ActionParams} data 
+   * @param {number} [ack] 
+   * @returns {Bluebird<{}>} 
+   * @memberof Client
    */
   public emit(name: string, action: string, type: PacketType, data: moleculer.ActionParams, ack?: number) : Bluebird<{}> {
     return new Bluebird.Promise(async (resolve, reject) => {
@@ -154,14 +165,16 @@ class Client {
     });
   }
 
-  /**
-   * ResponseCallback
-   * Send response to custom action
-   * @param action 
-   * @param data 
-   * @param ack 
-   */
-  private ResponseCallback(action, data, ack?) {
+/**
+ * Send response to custom action
+ * @public
+ * @param {any} action 
+ * @param {any} data 
+ * @param {any} [ack] 
+ * @returns {(err: any, data: any) => void} 
+ * @memberof Client
+ */
+public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
     const _self = this;
     return function(err, data) {
       if (!ack) { // No need to send back a response if the clien't doesn't want one.
@@ -178,9 +191,10 @@ class Client {
   }
 
   /**
-   * messageHandler
    * Handle incomming packets
-   * @param packet Buffer | string
+   * @private
+   * @param {(Buffer | string)} packet 
+   * @memberof Client
    */
   private messageHandler(packet: Buffer | string) : void {
     let _ack: number; // To respend if client demanded an ack on their request.
@@ -305,9 +319,9 @@ export class WSGateway {
   public clients: Client[] = [];
 
   /**
-   * created
    * Setup http or https server
    * Setup websocket server
+   * @memberof WSGateway
    */
   created() {
     this.Emitter = new EventEmitter2();
@@ -340,8 +354,8 @@ export class WSGateway {
   }
 
   /**
-   * started
-   * Here we start the webserver and start to listen for connections
+   * Started handler for moleculer
+   * @memberof WSGateway
    */
   started() {
     this.webServer.listen(this.settings.port, this.settings.ip, err => {
@@ -360,7 +374,8 @@ export class WSGateway {
   }
 
   /**
-   * stopped
+   * Stopped handler for moleculer
+   * @memberof WSGateway
    */
   stopped() {
     if (this.webServer.listening) {
@@ -374,9 +389,11 @@ export class WSGateway {
   }
 
   /**
-   * @TODO
-   * @param req 
-   * @param res 
+   * UWS Httphandler
+   * @private
+   * @param {http.IncomingMessage} req 
+   * @param {http.ServerResponse} res 
+   * @memberof WSGateway
    */
   private httphandler(req: http.IncomingMessage, res: http.ServerResponse) {
     res.writeHead(204, {
@@ -386,10 +403,12 @@ export class WSGateway {
   }
 
   /**
-   * StartHeartbeat
+   * Start heartbeat
+   * @public
+   * @memberof WSGateway
    */
   @Method
-  private StartHeartbeat() : void {
+  public StartHeartbeat() : void {
     if (!this.heartbeatEnabled)
       this.heartbeatTimer = new timer();
 
@@ -400,9 +419,10 @@ export class WSGateway {
 
   /**
    * Stop heartbeat
+   * @memberof WSGateway
    */
   @Method
-  private StopHeartbeat() : void {
+  public StopHeartbeat() : void {
     if (this.heartbeatEnabled)
       this.heartbeatTimer.clearInterval();
 
@@ -411,11 +431,11 @@ export class WSGateway {
   }
 
   /**
-   * Send
    * Send to a specific client with id
-   * @param id ClientID
-   * @param action 
-   * @param data 
+   * @param {string} id 
+   * @param {string} action 
+   * @param {moleculer.GenericObject} data 
+   * @memberof WSGateway
    */
   @Method
   public send(id: string, action: string, data: moleculer.GenericObject) {
@@ -424,10 +444,10 @@ export class WSGateway {
   }
 
   /**
-   * Emit
    * Send to all clients
-   * @param action string
-   * @param data 
+   * @param {string} action 
+   * @param {moleculer.GenericObject} data 
+   * @memberof WSGateway
    */
   @Method
   public emit(action: string, data: moleculer.GenericObject) {
@@ -437,9 +457,11 @@ export class WSGateway {
 
   /**
    * Ping clients
+   * @returns {void} 
+   * @memberof WSGateway
    */
   @Method
-  private PingClients() : void {
+  public PingClients() : void {
     this.logger.debug('Pinging clients');
     for (let i = 0; i < this.clients.length; i++) {
       if (!this.clients[i].alive) { // Not alive since last ping
@@ -454,18 +476,20 @@ export class WSGateway {
   }
 
   /**
-   * ConnectionHandler
-   * Here we create a new client
-   * @param socket 
+   * Creates a new client
+   * @param {uws} socket 
+   * @memberof WSGateway
    */
   @Method
-  private ConnectionHandler(socket: uws) : void {
+  public ConnectionHandler(socket: uws) : void {
     this.clients.push(new Client(socket, this));
   }
 
   /**
-   * DecodePacket
-   * @param message 
+   * Decode incoming packets
+   * @param {(Buffer | string | any)} message 
+   * @returns {Bluebird<Packet>} 
+   * @memberof WSGateway
    */
   @Method
   public DecodePacket(message: Buffer | string | any): Bluebird<Packet> {
@@ -493,8 +517,10 @@ export class WSGateway {
   }
   
   /**
-   * EncodePacket
-   * @param packet 
+   * Encodes outgoing packets
+   * @param {Packet} packet 
+   * @returns {(Bluebird<Buffer | string>)} 
+   * @memberof WSGateway
    */
   @Method
   public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
@@ -529,11 +555,14 @@ export class WSGateway {
   /**
    * Check whitelist
    * Credits: Icebob
-   * @param route 
-   * @param action 
+   * @public
+   * @param {route} route 
+   * @param {string} action 
+   * @returns {boolean} 
+   * @memberof WSGateway
    */
   @Method
-  private checkWhitelist(route: route, action: string) : boolean {
+  public checkWhitelist(route: route, action: string) : boolean {
     return route.whitelist.find((mask: string | RegExp) => {
       if (_.isString(mask)) {
         return nanomatch.isMatch(action, mask, { unixify: false });
@@ -544,13 +573,14 @@ export class WSGateway {
   }
 
   /**
-   * ProcessRoute
-   * Here we check if authorization method exists on
-   * the route and set the default mappingPolicy
-   * @param route 
+   * Here we check if authorization method exists on the route and set the default mappingPolicy
+   * @public
+   * @param {route} route 
+   * @returns {route} 
+   * @memberof WSGateway
    */
   @Method
-  private ProcessRoute(route: route) : route {
+  public ProcessRoute(route: route) : route {
     // Check if we have a valid authorization method.
     if (route.authorization) {
       if (!_.isFunction(this.authorization)) {
@@ -566,11 +596,14 @@ export class WSGateway {
   }
 
   /**
-   * FindRoute
-   * @param name 
+   * Find route by name & action
+   * @param {string} name 
+   * @param {string} action 
+   * @returns {Bluebird<{ route: route, action: string }>} 
+   * @memberof WSGateway
    */
   @Method
-  private FindRoute(name: string, action: string) : Bluebird<{ route: route, action: string }> {
+  public FindRoute(name: string, action: string) : Bluebird<{ route: route, action: string }> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.settings.routes && this.settings.routes.length > 0) {
         for (let route of this.settings.routes) {
@@ -603,12 +636,14 @@ export class WSGateway {
 
 
   /**
-   * CallAction
-   * @param sender Client
-   * @param name string
-   * @param _action string
-   * @param params ActionParams
+   * Call an action on the first available node
    * @Note: No native promises & async/await as it hurts performance, if you need another performance kick, consider converting all promises to callbacks.
+   * @param {Client} sender 
+   * @param {string} name 
+   * @param {string} _action 
+   * @param {moleculer.ActionParams} params 
+   * @returns {Bluebird<any>} 
+   * @memberof WSGateway
    */
   @Method
   public CallAction(sender: Client, name: string, _action: string, params: moleculer.ActionParams) : Bluebird<any> {
