@@ -19,6 +19,7 @@
   "dependencies": {
     "es6-error": "^4.1.1",
     "eventemitter2": "^5.0.1",
+    "ioredis": "^3.2.2",
     "lodash": "^4.17.4",
     "moleculer": "^0.11.10",
     "moleculer-decorators": "^1.0.11",
@@ -31,6 +32,7 @@
     "@types/async": "^2.0.47",
     "@types/bluebird": "^3.5.20",
     "@types/http-status": "^0.2.30",
+    "@types/ioredis": "^3.2.5",
     "@types/lodash": "^4.14.100",
     "@types/node": "^9.3.0",
     "@types/uws": "^0.13.1",

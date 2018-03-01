@@ -62,7 +62,12 @@ export interface Settings {
   https?: {
     key: string,
     cert: string
-  } 
+  },
+  storage?: {
+    host: string,
+    port: number,
+    type: 'redis'
+  }
 }
 
 export interface callOptions {
@@ -282,7 +287,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 
 @Service()
 export class WSGateway {
-  // begin hacks (will not get assigned)
+  // begin hacks (these will be stripped)
   private name: string;
   public broker: moleculer.ServiceBroker;
   public methods: any;
@@ -451,7 +456,17 @@ export class WSGateway {
    */
   @Method
   public emit(action: string, data: moleculer.GenericObject) {
-    this.logger.debug('Sending to all clients');
+    this.logger.debug('Sending to all clients on this node');
+    this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
+  }
+
+  @Method
+  public emitAcross(action: string, data: moleculer.GenericObject) {
+    if (this.settings.storage) {
+      
+    }
+
+    this.logger.debug('Sending to all clients on all nodes');
     this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
   }
 
@@ -721,5 +736,53 @@ export class WSGateway {
         return reject(err);
       });
     });
+  }
+
+  /**
+   * Let other nodes send to all clients on this server
+   * 
+   * @public
+   * @param {Packet} payload 
+   * @returns 
+   * @memberof WSGateway
+   */
+  @Event
+  public "$ws.SendToAll"(payload: Packet, sender) {
+    this.logger.debug(`${sender} requested send to all`);
+    return this.emit(payload.action, payload.data);
+  }
+
+  /**
+   * Let other nodes send to a client on this server
+   * 
+   * @public
+   * @param {any} payload 
+   * @returns 
+   * @memberof WSGateway
+   */
+  @Event
+  public "$ws.sendToClient"(payload, sender) {
+    const id = payload.id,
+          packet: Packet = payload.packet;
+
+    this.logger.debug(`Sending to ${id} from ${sender}`);
+
+    return this.send(id, packet.action, packet.data);
+  }
+
+  /**
+   * Get clients from this node
+   * 
+   * @public
+   * @param {any} payload 
+   * @param {any} sender 
+   * @memberof WSGateway
+   */
+  @Event
+  public "$ws.GetClients"(payload, sender) {
+    this.logger.debug(`${sender} requested client list`);
+    this.broker.emit("$ws.Clients", this.clients.map(c => {
+      return { id: c.id, props: c.props }
+    }), sender);
   }
 }
