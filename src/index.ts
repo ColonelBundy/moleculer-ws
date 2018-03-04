@@ -70,8 +70,11 @@ interface external_client_payload {
   props: moleculer.GenericObject
 }
 
+// @TODO 
+// * Convert to class
+// * add functions that when called gets executed on node where the client lives, eg: .emit/.send
 interface external_client extends external_client_payload {
-  nodeID: string
+  nodeID: string,
 }
 
 export interface callOptions {
@@ -259,8 +262,9 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
               this.on('action_name', (data, client, respond) => {
                 respond(error (can be null), data_to_respond_with) // to respond to this particular request.
                 client.emit(....) // to send anything else to the client.
-                this.emit(...) // to send to everyone
-                this.send(id, ...) // to send to a client with id
+                this.emit(...) // to send to everyone on this node
+                this.emitAcross(...) // to send to everyone on all nodes
+                this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
               });
             */
             this.server.Emitter.emit(action, data, this, this.ResponseCallback(action, data, ack)); // Add a callback function so we can allow a response
