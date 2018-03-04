@@ -893,7 +893,7 @@ export class WSGateway {
     const id = payload.id,
           packet: Packet = payload.packet;
 
-    this.logger.debug(`Sending to ${id} from ${sender}`);
+    this.logger.debug(`Sending to ${id} from node: ${sender}`);
 
     return this.send(id, packet.action, packet.data, true);
   }
@@ -906,9 +906,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Event()
-  public '$node.disconnected'(payload, sender) {
-    this.clients_external = this.clients_external.filter(c => { // Remove clients connected to the disconnected node
-      return (c.nodeID === sender ? '' : c);
-    })
+  public '$node.disconnected'(payload, sender) { // Remove clients connected to the disconnected node
+    this.clients_external = this.clients_external.filter(c => c.nodeID !== sender)
   }
 }
