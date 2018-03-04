@@ -62,12 +62,16 @@ export interface Settings {
   https?: {
     key: string,
     cert: string
-  },
-  storage?: {
-    host: string,
-    port: number,
-    type: 'redis'
   }
+}
+
+interface external_client_payload {
+  id: string,
+  props: moleculer.GenericObject
+}
+
+interface external_client extends external_client_payload {
+  nodeID: string
 }
 
 export interface callOptions {
@@ -151,6 +155,7 @@ class Client {
 
   /**
    * Send to client
+   * 
    * @param {string} name 
    * @param {string} action 
    * @param {PacketType} type 
@@ -172,6 +177,7 @@ class Client {
 
 /**
  * Send response to custom action
+ * 
  * @public
  * @param {any} action 
  * @param {any} data 
@@ -197,6 +203,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 
   /**
    * Handle incomming packets
+   * 
    * @private
    * @param {(Buffer | string)} packet 
    * @memberof Client
@@ -277,6 +284,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 
   /**
    * SendResponse
+   * 
    * @param data 
    * @param ack 
    */
@@ -297,7 +305,7 @@ export class WSGateway {
 
   public settings: Settings = {
     port: parseInt(process.env.PORT) || 3000,
-    ip: process.env.IP || "0.0.0.0",
+    ip: process.env.IP || '0.0.0.0',
     perMessageDeflate: false,
     path: '/',
     routes: [],
@@ -322,6 +330,7 @@ export class WSGateway {
   protected heartbeatEnabled: boolean = false;
   protected heartbeatTimer: timer;
   public clients: Client[] = [];
+  public clients_external: external_client[] = [];
 
   /**
    * Setup http or https server
@@ -365,10 +374,10 @@ export class WSGateway {
   started() {
     this.webServer.listen(this.settings.port, this.settings.ip, err => {
       if (err)
-        return this.logger.error("WS Gateway listen error!", err);
+        return this.logger.error('WS Gateway listen error!', err);
 
       const addr = this.webServer.address();
-      this.logger.info(`WS Gateway listening on ${this.isHTTPS ? "https" : "http"}://${addr.address}:${addr.port}`);
+      this.logger.info(`WS Gateway listening on ${this.isHTTPS ? 'https' : 'http'}://${addr.address}:${addr.port}`);
     });
 
     if (this.settings.heartbeat.enabled && !this.heartbeatEnabled)
@@ -388,8 +397,8 @@ export class WSGateway {
         Bluebird.promisify(this.server.close),
         Bluebird.promisify(this.webServer.close)
       ]).then(() => {
-        this.logger.info("WS Gateway stopped!");
-      }).catch(e => this.logger.error("WS Gateway close error!", e));
+        this.logger.info('WS Gateway stopped!');
+      }).catch(e => this.logger.error('WS Gateway close error!', e));
 		}
   }
 
@@ -402,7 +411,7 @@ export class WSGateway {
    */
   private httphandler(req: http.IncomingMessage, res: http.ServerResponse) {
     res.writeHead(204, {
-      "Content-Length": "0"
+      'Content-Length': '0'
     });
     res.end();
   }
@@ -437,19 +446,38 @@ export class WSGateway {
 
   /**
    * Send to a specific client with id
+   * 
    * @param {string} id 
    * @param {string} action 
    * @param {moleculer.GenericObject} data 
+   * @param {boolean} [isExternal] Only applied to prevent a race condition which shouldn't exist.
    * @memberof WSGateway
    */
   @Method
-  public send(id: string, action: string, data: moleculer.GenericObject) {
-    this.logger.debug(`Sending to client with id: ${id}`);
-    this.clients.find(c => c.id === id).emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
+  public send(id: string, action: string, data: moleculer.GenericObject, isExternal?: boolean) {
+    const client: Client = this.clients.find(c => c.id === id);
+
+    if (!client && !isExternal) {
+      const external = this.clients_external.find(c => c.id === id);
+
+      if (external) {
+        this.logger.debug(`Sending to a client with id: ${id} on node ${external.nodeID}`);
+        this.broker.emit('ws.client.send', <Packet>{
+          action,
+          data
+        }, external.nodeID);
+      } else {
+        this.logger.error(`Client ${id} not found`);
+      }
+    } else {
+      this.logger.debug(`Sending to a client with id: ${id}`);
+      this.clients.find(c => c.id === id).emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
+    }
   }
 
   /**
    * Send to all clients
+   * 
    * @param {string} action 
    * @param {moleculer.GenericObject} data 
    * @memberof WSGateway
@@ -460,48 +488,94 @@ export class WSGateway {
     this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
   }
 
+  /**
+   * Send to all clients on all nodes
+   * 
+   * @param {string} action 
+   * @param {moleculer.GenericObject} data 
+   * @memberof WSGateway
+   */
   @Method
   public emitAcross(action: string, data: moleculer.GenericObject) {
-    if (this.settings.storage) {
-      
-    }
-
     this.logger.debug('Sending to all clients on all nodes');
+    this.broker.broadcast('ws.client.SendToAll', <Packet>{
+      action,
+      data
+    }, 'ws')
+    
     this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
   }
 
   /**
    * Ping clients
+   * 
    * @returns {void} 
    * @memberof WSGateway
    */
   @Method
   public PingClients() : void {
     this.logger.debug('Pinging clients');
-    for (let i = 0; i < this.clients.length; i++) {
-      if (!this.clients[i].alive) { // Not alive since last ping
-        this.clients[i].socket.close() // Close connection
-        this.clients.splice(i, 1); // Remove client
-        return;
+    this.clients = this.clients.filter(u => {
+      if (!u.alive) { // Not alive since last ping
+        u.Close(); // Close connection (if there's one)
+
+        this.broker.broadcast('ws.client.disconnected', <external_client>{ // Let other nodes know user disconnected
+          id: u.id,
+          props: u.props
+        }, 'ws');
+
+        return false;
       }
 
-      this.clients[i].alive = false;
-      this.clients[i].socket.ping(_.noop);
-    }
+      u.alive = false;
+      u.socket.ping(_.noop);
+
+      return true;
+    });
   }
 
   /**
    * Creates a new client
+   * 
    * @param {uws} socket 
    * @memberof WSGateway
    */
   @Method
   public ConnectionHandler(socket: uws) : void {
-    this.clients.push(new Client(socket, this));
+    const client = new Client(socket, this);
+
+    socket.on('close', this.DisconnectHandler.bind(client));
+
+    this.clients.push(client); // Add client
+
+    // Let other nodes know about this client
+    this.broker.broadcast('ws.client.connected', {
+      id: client.id,
+      props: client.props
+    }, 'ws');
+  }
+
+
+  /**
+   * Handles client disconnect
+   * 
+   * @param {Client} client 
+   * @memberof WSGateway
+   */
+  @Method
+  public DisconnectHandler(client: Client) : void {
+    this.clients.splice(this.clients.findIndex(c => c.id === client.id)); // Remove client
+
+    // Let other nodes know this client has disconnected
+    this.broker.broadcast('ws.client.disconnected', {
+      id: client.id,
+      props: client.props
+    }, 'ws');
   }
 
   /**
    * Decode incoming packets
+   * 
    * @param {(Buffer | string | any)} message 
    * @returns {Bluebird<Packet>} 
    * @memberof WSGateway
@@ -533,6 +607,7 @@ export class WSGateway {
   
   /**
    * Encodes outgoing packets
+   * 
    * @param {Packet} packet 
    * @returns {(Bluebird<Buffer | string>)} 
    * @memberof WSGateway
@@ -570,6 +645,7 @@ export class WSGateway {
   /**
    * Check whitelist
    * Credits: Icebob
+   * 
    * @public
    * @param {route} route 
    * @param {string} action 
@@ -589,6 +665,7 @@ export class WSGateway {
 
   /**
    * Here we check if authorization method exists on the route and set the default mappingPolicy
+   * 
    * @public
    * @param {route} route 
    * @returns {route} 
@@ -612,6 +689,7 @@ export class WSGateway {
 
   /**
    * Find route by name & action
+   * 
    * @param {string} name 
    * @param {string} action 
    * @returns {Bluebird<{ route: route, action: string }>} 
@@ -653,6 +731,7 @@ export class WSGateway {
   /**
    * Call an action on the first available node
    * @Note: No native promises & async/await as it hurts performance, if you need another performance kick, consider converting all promises to callbacks.
+   * 
    * @param {Client} sender 
    * @param {string} name 
    * @param {string} _action 
@@ -738,6 +817,50 @@ export class WSGateway {
     });
   }
 
+
+  /**
+   * Client connected on another node
+   * 
+   * @param {external_client_payload} payload 
+   * @param {any} sender 
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  public 'ws.client.connected'(payload: external_client_payload, sender) {
+    if (sender === this.broker.nodeID) { return; }
+
+    this.logger.debug(`Client: ${payload.id} connected on node: ${sender}`);
+
+    const opts = { nodeID: sender, ...payload }
+    this.clients_external.push(opts);
+
+    this.Emitter.emit('connected_external', opts);
+  }
+
+
+  /**
+   * Client disconnected on another node
+   * 
+   * @param {external_client_payload} payload 
+   * @param {any} sender 
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  public 'ws.client.disconnected'(payload: external_client_payload, sender) {
+    if (sender === this.broker.nodeID) { return; }
+    this.logger.debug(`Client: ${payload.id} disconnected on node: ${sender}`);
+
+    const opts = { nodeID: sender, ...payload }
+    this.clients_external.push(opts);
+    this.clients_external.splice(this.clients_external.findIndex(c => c.nodeID === sender && c.id === payload.id), 1);
+
+    this.Emitter.emit('disconnected_external', opts);
+  }
+
   /**
    * Let other nodes send to all clients on this server
    * 
@@ -746,8 +869,11 @@ export class WSGateway {
    * @returns 
    * @memberof WSGateway
    */
-  @Event
-  public "$ws.SendToAll"(payload: Packet, sender) {
+  @Event({
+    group: 'ws'
+  })
+  public 'ws.client.SendToAll'(payload: Packet, sender) {
+    if (sender === this.broker.nodeID) { return; }
     this.logger.debug(`${sender} requested send to all`);
     return this.emit(payload.action, payload.data);
   }
@@ -760,29 +886,29 @@ export class WSGateway {
    * @returns 
    * @memberof WSGateway
    */
-  @Event
-  public "$ws.sendToClient"(payload, sender) {
+  @Event({
+    group: 'ws'
+  })
+  public 'ws.client.send'(payload, sender) {
     const id = payload.id,
           packet: Packet = payload.packet;
 
     this.logger.debug(`Sending to ${id} from ${sender}`);
 
-    return this.send(id, packet.action, packet.data);
+    return this.send(id, packet.action, packet.data, true);
   }
 
   /**
-   * Get clients from this node
+   * Remove clients connected to the disconnected node
    * 
-   * @public
    * @param {any} payload 
    * @param {any} sender 
    * @memberof WSGateway
    */
-  @Event
-  public "$ws.GetClients"(payload, sender) {
-    this.logger.debug(`${sender} requested client list`);
-    this.broker.emit("$ws.Clients", this.clients.map(c => {
-      return { id: c.id, props: c.props }
-    }), sender);
+  @Event()
+  public '$node.disconnected'(payload, sender) {
+    this.clients_external = this.clients_external.filter(c => { // Remove clients connected to the disconnected node
+      return (c.nodeID === sender ? '' : c);
+    })
   }
 }
