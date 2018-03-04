@@ -356,6 +356,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   created() {
+    //#region ugly stuff
     this.Emitter = new EventEmitter2();
     this.on = this.Emitter.on.bind(this.Emitter);
     this.once = this.Emitter.on.bind(this.Emitter);
@@ -364,6 +365,7 @@ export class WSGateway {
     this.addListener = this.Emitter.addListener.bind(this.Emitter);
     this.removeListener = this.Emitter.removeListener.bind(this.Emitter);
     this.removeAllListeners = this.Emitter.removeAllListeners.bind(this.Emitter);
+    //#endregion
 
     if (this.settings.https && this.settings.https.key && this.settings.https.cert) {
       this.webServer = https.createServer(this.settings.https, this.httphandler);
@@ -424,6 +426,7 @@ export class WSGateway {
 
   /**
    * UWS Httphandler
+   * 
    * @private
    * @param {http.IncomingMessage} req 
    * @param {http.ServerResponse} res 
@@ -438,6 +441,7 @@ export class WSGateway {
 
   /**
    * Start heartbeat
+   * 
    * @public
    * @memberof WSGateway
    */
@@ -453,6 +457,7 @@ export class WSGateway {
 
   /**
    * Stop heartbeat
+   * 
    * @memberof WSGateway
    */
   @Method
