@@ -147,7 +147,7 @@ class Client {
         this.server.broker.broadcast('ws.client.update', {
           id: this.id,
           props: obj
-        })
+        }, 'ws')
 
         return true;
       }
