@@ -139,6 +139,20 @@ class Client {
     this.server = _server;
     this.logger = this.server.broker.logger;
 
+    // Sync prop updates to all nodes.
+    this.props = new Proxy({}, {
+      set: (obj, prop, value) => {
+        obj[prop] = value;
+
+        this.server.broker.broadcast('ws.client.update', {
+          id: this.id,
+          props: obj
+        })
+
+        return true;
+      }
+    })
+
     this.socket.on('message', this.messageHandler.bind(this));
     this.socket.on('pong', () => this.alive = true);
   }
@@ -365,6 +379,8 @@ export class WSGateway {
     if (_.isArray(this.settings.routes)) {
       this.settings.routes = this.settings.routes.map(route => this.ProcessRoute(route));
     }
+
+    shortid.worker(process.env.NODE_UNIQUE_ID || Math.floor(Math.random() * 17)) // See https://www.npmjs.com/package/shortid for more info
   }
 
   /**
@@ -896,6 +912,22 @@ export class WSGateway {
     this.logger.debug(`Sending to ${id} from node: ${sender}`);
 
     return this.send(id, packet.action, packet.data, true);
+  }
+
+  /**
+   * Sync props
+   * 
+   * @param {any} payload 
+   * @param {any} sender 
+   * @returns 
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  public 'ws.client.update'(payload, sender) {
+    if (sender === this.broker.nodeID) { return; }
+    this.clients_external.find(c => c.id === payload.id).props = payload.props;
   }
 
   /**
