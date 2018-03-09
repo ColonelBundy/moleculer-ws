@@ -154,8 +154,4 @@ describe('Gateway', function() {
       });
     })
   });
-
-  it('Should stop gateway', (done) => {
-    broker.stop().then(() => done());
-  })
 });
