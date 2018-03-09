@@ -13,7 +13,7 @@ import _          = require('lodash');
 import nanomatch  = require('nanomatch');
 import shortid    = require('shortid');
 import Bluebird   = require('bluebird');
-import { Service, Action, Event, Method } from 'moleculer-decorators';
+import { Service, Action, Event, Method, BaseSchema } from 'moleculer-decorators';
 import { EventEmitter2 } from 'eventemitter2';
 import { SocketNotOpen, NotAuthorized, RouteNotFound, ClientError, EncodeError, DecodeError, EndpointNotAvailable, ServiceNotAvailable } from './errors';
 
@@ -238,6 +238,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
         _type = type;
 
         if (type === PacketType.INTERNAL) { // internal defines that we can all internal method that may or may not be on this particular node.
+          this.logger.debug('Internal action');
           if (action === InternalActions.AUTH) {
             this.logger.debug('Internal auth');
             if (!this.authorized) {
@@ -259,8 +260,8 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
               });
             }
           }
-        } else if (PacketType.CUSTOM) {
-          this.logger.debug('Custom actions');
+        } else if (type === PacketType.CUSTOM) {
+          this.logger.debug('Custom action');
 
             /** 
              * Do we actually need both emitters?
@@ -281,7 +282,8 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
             */
             this.server.Emitter.emit(action, data, this, this.ResponseCallback(action, data, ack)); // Add a callback function so we can allow a response
             return Bluebird.Promise.resolve();
-        } else if (PacketType.SYSTEM) { // System defines that we call a moleculer action
+        } else if (type === PacketType.SYSTEM) { // System defines that we call a moleculer action
+          this.logger.debug('System action');
           return this.server.CallAction(this, name, action, data);
         } else {
           return new ClientError('Malformed packet'); // Should never reach here unless type is undefined
@@ -324,12 +326,11 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 }
 
 // Only for type support
-export class BaseClass {
+export class BaseClass extends BaseSchema {
   public on: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
   public send: WSGateway['send']
   public emit: WSGateway['emit']
   public clients: WSGateway['clients']
-  public broker: WSGateway['broker']
 }
 
 
