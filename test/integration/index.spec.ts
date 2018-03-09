@@ -8,7 +8,6 @@ import ws = require('ws');
 function Setup() {
   const broker = new ServiceBroker(/**{logger: console, logLevel: 'debug'} **/);
   const service = broker.createService(<any>Gateway);
-  const server = service.server;
 
   return [
     broker,
