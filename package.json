@@ -7,8 +7,8 @@
     "clean": "rimraf dist/*",
     "compile": "yarn clean && tsc && node src/dist/index.js",
     "dev": "nodemon -e ts --exec \"yarn compile\"",
-    "testing": "yarn clean && tsc && node dist/src/testing/service.js",
-    "testing2": "yarn clean && tsc && node dist/src/testing/second.service.js",
+    "testing": "yarn clean && tsc && node dist/src/testing/index.js",
+    "runner": "yarn clean && tsc && moleculer-runner --repl --config dist/src/testing/moleculer.dev.config.js dist/src/testing/services",
     "debug": "yarn clean && tsc && node --inspect dist/src/index.js"
   },
   "engines": {
@@ -34,6 +34,8 @@
     "@types/lodash": "^4.14.100",
     "@types/node": "^9.3.0",
     "@types/uws": "^0.13.1",
+    "ioredis": "^3.2.2",
+    "moleculer-repl": "^0.4.0",
     "nodemon": "^1.11.0",
     "rimraf": "^2.6.1",
     "typescript": "^2.7.1"

@@ -49,7 +49,10 @@ export interface Packet {
 export interface Settings {
   port: number,
   ip?: string,
-  externalAuth?: boolean,
+  externalAuth?: {
+    enabled: boolean,
+    endpoint: string // eg: 'users.auth' where 'users' is the service and 'auth' the action 
+  },
   heartbeat?: {
     enabled: boolean,
     interval?: number
@@ -90,7 +93,7 @@ export interface aliases {
 export interface Request {
   action: string,
   sender: {
-    socket: uws,
+    id: string,
     props: moleculer.GenericObject
   },
   params: moleculer.ActionParams
@@ -102,8 +105,8 @@ export interface route {
   whitelist?: string[],
   authorization?: boolean,
   mappingPolicy?: 'strict' | 'all',
-  onAfterCall?(ctx: moleculer.Context, req: Request, res: any): Bluebird<moleculer.Context>,
-  onBeforeCall?(ctx: moleculer.Context, req: Request): Bluebird<moleculer.Context>,
+  onAfterCall?(ctx: moleculer.Context, req: Request, res: any): Bluebird<moleculer.Context | moleculer.GenericObject>,
+  onBeforeCall?(ctx: moleculer.Context, req: Request): Bluebird<moleculer.Context | moleculer.GenericObject>,
   callOptions?: callOptions,
   onError?(req, res, err): void
 }
@@ -238,13 +241,22 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
           if (action === InternalActions.AUTH) {
             this.logger.debug('Internal auth');
             if (!this.authorized) {
-              if (this.server.settings.externalAuth) {
+              if (this.server.settings.externalAuth && this.server.settings.externalAuth.enabled) {
                 this.logger.debug('External auth method');
-                return this.server.CallAction(this, name, action, data);
-              } else {
-                this.logger.debug('Internal auth method');
-                return Bluebird.Promise.method(this.server.methods.authorize(data));
+
+                const endpoint = this.server.settings.externalAuth.endpoint.split('.');
+
+                return this.server.CallAction(this, endpoint[0], endpoint[1], data).then(resp => {
+                  this.authorized = true;
+                  return Bluebird.resolve(resp);
+                });
               }
+
+              this.logger.debug('Internal auth method');
+              return Bluebird.Promise.method(this.server.methods.authorize)(data).then(resp => {
+                this.authorized = true;
+                return Bluebird.resolve(resp);
+              });
             }
           }
         } else if (PacketType.CUSTOM) {
@@ -311,9 +323,19 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
   }
 }
 
+// Only for type support
+export class BaseClass {
+  public on: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
+  public send: WSGateway['send']
+  public emit: WSGateway['emit']
+  public clients: WSGateway['clients']
+  public broker: WSGateway['broker']
+}
+
+
 @Service()
 export class WSGateway {
-  // begin hacks (these will be stripped)
+  // begin hacks (these will be "stripped")
   private name: string;
   public broker: moleculer.ServiceBroker;
   public methods: any;
@@ -384,6 +406,14 @@ export class WSGateway {
 
     if (_.isArray(this.settings.routes)) {
       this.settings.routes = this.settings.routes.map(route => this.ProcessRoute(route));
+    }
+
+    // Pre check
+    if (this.settings.externalAuth && this.settings.externalAuth.enabled) {
+      const endpoint = this.settings.externalAuth.endpoint.split('.');
+      if (endpoint.length !== 1 || !endpoint[0] || !endpoint[1]) {
+        this.logger.fatal('Externalauth endpoint is invalid!');
+      }
     }
 
     shortid.worker(process.env.NODE_UNIQUE_ID || Math.floor(Math.random() * 17)) // See https://www.npmjs.com/package/shortid for more info
@@ -496,7 +526,7 @@ export class WSGateway {
       }
     } else {
       this.logger.debug(`Sending to a client with id: ${id}`);
-      this.clients.find(c => c.id === id).emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
+      client.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
     }
   }
 
@@ -538,7 +568,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public PingClients() : void {
+  private PingClients() : void {
     this.logger.debug('Pinging clients');
     this.clients = this.clients.filter(u => {
       if (!u.alive) { // Not alive since last ping
@@ -566,12 +596,14 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public ConnectionHandler(socket: uws) : void {
+  private ConnectionHandler(socket: uws) : void {
     const client = new Client(socket, this);
 
     socket.on('close', this.DisconnectHandler.bind(client));
 
     this.clients.push(client); // Add client
+
+    this.logger.info(`Client: ${client.id} connected`);
 
     // Let other nodes know about this client
     this.broker.broadcast('ws.client.connected', {
@@ -588,8 +620,10 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public DisconnectHandler(client: Client) : void {
+  private DisconnectHandler(client: Client) : void {
     this.clients.splice(this.clients.findIndex(c => c.id === client.id)); // Remove client
+
+    this.logger.info(`Client: ${client.id} disconnected`);
 
     // Let other nodes know this client has disconnected
     this.broker.broadcast('ws.client.disconnected', {
@@ -671,14 +705,14 @@ export class WSGateway {
    * Check whitelist
    * Credits: Icebob
    * 
-   * @public
+   * @private
    * @param {route} route 
    * @param {string} action 
    * @returns {boolean} 
    * @memberof WSGateway
    */
   @Method
-  public checkWhitelist(route: route, action: string) : boolean {
+  private checkWhitelist(route: route, action: string) : boolean {
     return route.whitelist.find((mask: string | RegExp) => {
       if (_.isString(mask)) {
         return nanomatch.isMatch(action, mask, { unixify: false });
@@ -691,13 +725,13 @@ export class WSGateway {
   /**
    * Here we check if authorization method exists on the route and set the default mappingPolicy
    * 
-   * @public
+   * @private
    * @param {route} route 
    * @returns {route} 
    * @memberof WSGateway
    */
   @Method
-  public ProcessRoute(route: route) : route {
+  private ProcessRoute(route: route) : route {
     // Check if we have a valid authorization method.
     if (route.authorization) {
       if (!_.isFunction(this.authorization)) {
@@ -715,13 +749,14 @@ export class WSGateway {
   /**
    * Find route by name & action
    * 
+   * @private
    * @param {string} name 
    * @param {string} action 
    * @returns {Bluebird<{ route: route, action: string }>} 
    * @memberof WSGateway
    */
   @Method
-  public FindRoute(name: string, action: string) : Bluebird<{ route: route, action: string }> {
+  private FindRoute(name: string, action: string) : Bluebird<{ route: route, action: string }> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.settings.routes && this.settings.routes.length > 0) {
         for (let route of this.settings.routes) {
@@ -791,21 +826,24 @@ export class WSGateway {
         (ctx as any)._metricStart(ctx.metrics);
 
         if (route.onBeforeCall) {
-          // In beforecall you can modify the params and the context.
-          Bluebird.Promise.resolve(route.onBeforeCall.call(this, ctx, {
+          // In beforecall you can modify the params, the context and client props.
+          Bluebird.Promise.resolve(route.onBeforeCall.call(this, ctx, <Request>{
               action,
               sender: {
-                socket: sender.socket,
+                id: sender.id,
                 props: sender.props
               },
               params
           })).then(result => {
             if (result) { // Override anything if the beforeCall returns them.
-              if (result.ctx)
+              if (result.ctx) // Apply context
                 ctx = result.ctx;
   
-              if (result.params)
+              if (result.params) // Apply params
                 params = result.params
+
+              if (result.props) // Apply props
+                this.clients.find(c => c.id === sender.id).props = _.extend({}, sender.props, result.props);
             }
           }).catch(reject);
         }
@@ -813,15 +851,15 @@ export class WSGateway {
         return ctx.call(endpoint, params).then((res) => {
           // In aftercall you can modify the result.
           if (route.onAfterCall) {
-            Bluebird.Promise.resolve(route.onAfterCall.call(this, ctx, {
+            Bluebird.Promise.resolve(route.onAfterCall.call(this, ctx, <Request>{
               action,
               sender: {
-                socket: sender.socket,
+                id: sender.id,
                 props: sender.props
               },
               params
             }, res)).then((result) => {
-              if (result)
+              if (result) // Apply result
                 res = result;
             }).catch(reject);
           }
@@ -853,7 +891,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  public 'ws.client.connected'(payload: external_client_payload, sender) {
+  private 'ws.client.connected'(payload: external_client_payload, sender) {
     if (sender === this.broker.nodeID) { return; }
 
     this.logger.debug(`Client: ${payload.id} connected on node: ${sender}`);
@@ -875,7 +913,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  public 'ws.client.disconnected'(payload: external_client_payload, sender) {
+  private 'ws.client.disconnected'(payload: external_client_payload, sender) {
     if (sender === this.broker.nodeID) { return; }
     this.logger.debug(`Client: ${payload.id} disconnected on node: ${sender}`);
 
@@ -897,7 +935,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  public 'ws.client.SendToAll'(payload: Packet, sender) {
+  private 'ws.client.SendToAll'(payload: Packet, sender) {
     if (sender === this.broker.nodeID) { return; }
     this.logger.debug(`${sender} requested send to all`);
     return this.emit(payload.action, payload.data);
@@ -914,7 +952,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  public 'ws.client.send'(payload, sender) {
+  private 'ws.client.send'(payload, sender) {
     const id = payload.id,
           packet: Packet = payload.packet;
 
@@ -934,8 +972,9 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  public 'ws.client.update'(payload, sender) {
+  private 'ws.client.update'(payload, sender) {
     if (sender === this.broker.nodeID) { return; }
+    this.logger.debug(`Client ${payload.id} updated props`);
     this.clients_external.find(c => c.id === payload.id).props = payload.props;
   }
 
@@ -947,7 +986,8 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Event()
-  public '$node.disconnected'(payload, sender) { // Remove clients connected to the disconnected node
+  private '$node.disconnected'(payload, sender) { // Remove clients connected to the disconnected node
+    this.logger.debug(`Node: ${sender} disconnected`);
     this.clients_external = this.clients_external.filter(c => c.nodeID !== sender)
   }
 }
