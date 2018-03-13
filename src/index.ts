@@ -285,7 +285,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
                 respond(error (can be null), data_to_respond_with) // to respond to this particular request.
                 client.emit(....) // to send anything else to the client.
                 this.emit(...) // to send to everyone on this node
-                this.emitAcross(...) // to send to everyone on all nodes
+                this.publish(...) // to send to everyone on all nodes
                 this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
               });
             */
@@ -344,7 +344,7 @@ export class BaseClass extends BaseSchema {
   public setMaxListeners: WSGateway['setMaxListeners']
   public send: WSGateway['send']
   public emit: WSGateway['emit']
-  public emitAcross: WSGateway['emitAcross']
+  public publish: WSGateway['publish']
   public clients: WSGateway['clients']
   public clients_external: WSGateway['clients_external']
   public settings: Settings;
@@ -573,7 +573,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public emitAcross(action: string, data: moleculer.GenericObject) {
+  public publish(action: string, data: moleculer.GenericObject) {
     this.logger.debug('Sending to all clients on all nodes');
     this.broker.broadcast('ws.client.SendToAll', <Packet>{
       action,
