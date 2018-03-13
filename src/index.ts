@@ -1013,10 +1013,4 @@ export class WSGateway {
     this.logger.debug(`Node: ${sender} disconnected`);
     this.clients_external = this.clients_external.filter(c => c.nodeID !== sender)
   }
-
-  // Testing output of external client's list
-  @Action()
-  private 'test.external'(ctx) {
-    return Bluebird.Promise.resolve(this.clients_external);
-  }
 }

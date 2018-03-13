@@ -1594,23 +1594,7 @@ moleculer-repl@^0.4.0:
     tiny-human-time "1.2.0"
     vorpal "1.12.0"
 
-moleculer@^0.12.1:
-  version "0.12.1"
-  resolved "https://registry.yarnpkg.com/moleculer/-/moleculer-0.12.1.tgz#b12965b8545f5ace2925483bf79dc34fc147072e"
-  dependencies:
-    args "3.0.8"
-    bluebird "3.5.1"
-    chalk "2.3.2"
-    es6-error "4.1.1"
-    eventemitter2 "5.0.1"
-    fastest-validator "0.6.5"
-    glob "7.1.2"
-    ipaddr.js "1.6.0"
-    lodash "4.17.5"
-    nanomatch "1.2.9"
-    node-object-hash "1.3.0"
-
-moleculer@moleculerjs/moleculer:
+moleculer@^0.12.1, moleculer@moleculerjs/moleculer:
   version "0.12.1"
   resolved "https://codeload.github.com/moleculerjs/moleculer/tar.gz/62226510cbaa65c0ef87668857ce13fc34ce8b48"
   dependencies:
