@@ -57,6 +57,10 @@ export interface Settings {
     enabled: boolean,
     interval?: number
   },
+  eventEmitter?: {
+    wildcard: boolean,
+    maxListeners: number
+  },
   perMessageDeflate?: boolean,
   encryption?: 'Binary' | 'JSON' | encryption,
   decryption?: decryption,
@@ -71,6 +75,11 @@ export interface Settings {
 interface external_client_payload {
   id: string,
   props: moleculer.GenericObject
+}
+
+interface external_client_send {
+  id: string,
+  packet: Packet
 }
 
 // @TODO 
@@ -145,7 +154,7 @@ class Client {
     this.server = _server;
     this.logger = this.server.broker.logger;
 
-    // Sync prop updates to all nodes.
+    // Sync prop updates to all nodes, if you were to modify the object, it'll send an update to the client automatically.
     this.props = new Proxy({}, {
       set: (obj, prop, value) => {
         obj[prop] = value;
@@ -328,9 +337,17 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 // Only for type support
 export class BaseClass extends BaseSchema {
   public on: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
+  public once: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
+  public many: (event: string, timesTolisten: number, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
+  public removeListener: WSGateway['removeListener']
+  public removeAllListeners: WSGateway['removeAllListeners']
+  public setMaxListeners: WSGateway['setMaxListeners']
   public send: WSGateway['send']
   public emit: WSGateway['emit']
+  public emitAcross: WSGateway['emitAcross']
   public clients: WSGateway['clients']
+  public clients_external: WSGateway['clients_external']
+  public settings: Settings;
 }
 
 
@@ -364,14 +381,15 @@ export class WSGateway {
   public addListener: EventEmitter2['addListener'];
   public removeListener: EventEmitter2['removeListener'];
   public removeAllListeners: EventEmitter2['removeAllListeners'];
+  public setMaxListeners: EventEmitter2['setMaxListeners'];
 
-  protected isHTTPS: boolean = false;
-  protected server: uws.Server
-  protected webServer: http.Server | https.Server
-  protected heartbeatEnabled: boolean = false;
-  protected heartbeatTimer: timer;
-  public clients: Client[] = [];
-  public clients_external: external_client[] = [];
+  public clients: Client[] = []; // List of clients connected to this node
+  public clients_external: external_client[] = []; // Replicated list of clients on other nodes
+  private isHTTPS: boolean = false;
+  private server: uws.Server
+  private webServer: http.Server | https.Server
+  private heartbeatEnabled: boolean = false;
+  private heartbeatTimer: timer;
 
   /**
    * Setup http or https server
@@ -380,7 +398,9 @@ export class WSGateway {
    */
   created() {
     //#region ugly stuff
-    this.Emitter = new EventEmitter2();
+    this.Emitter = new EventEmitter2(_.extend({
+      newListener: false, // Prevent wildcard catching this.
+    }, this.settings.eventEmitter));
     this.on = this.Emitter.on.bind(this.Emitter);
     this.once = this.Emitter.on.bind(this.Emitter);
     this.onAny = this.Emitter.onAny.bind(this.Emitter);
@@ -388,6 +408,7 @@ export class WSGateway {
     this.addListener = this.Emitter.addListener.bind(this.Emitter);
     this.removeListener = this.Emitter.removeListener.bind(this.Emitter);
     this.removeAllListeners = this.Emitter.removeAllListeners.bind(this.Emitter);
+    this.setMaxListeners = this.Emitter.setMaxListeners.bind(this.Emitter);
     //#endregion
 
     if (this.settings.https && this.settings.https.key && this.settings.https.cert) {
@@ -506,7 +527,7 @@ export class WSGateway {
    * @param {string} id 
    * @param {string} action 
    * @param {moleculer.GenericObject} data 
-   * @param {boolean} [isExternal] Only applied to prevent a race condition which shouldn't exist.
+   * @param {boolean} [isExternal] is only applied when its coming from an external node to prevent a race condition which shouldn't exist.
    * @memberof WSGateway
    */
   @Method
@@ -532,7 +553,7 @@ export class WSGateway {
   }
 
   /**
-   * Send to all clients
+   * Send to all clients on this node
    * 
    * @param {string} action 
    * @param {moleculer.GenericObject} data 
@@ -600,7 +621,7 @@ export class WSGateway {
   private ConnectionHandler(socket: uws) : void {
     const client = new Client(socket, this);
 
-    socket.on('close', this.DisconnectHandler.bind(client));
+    socket.on('close', this.DisconnectHandler.bind(this, client));
 
     this.clients.push(client); // Add client
 
@@ -919,7 +940,6 @@ export class WSGateway {
     this.logger.debug(`Client: ${payload.id} disconnected on node: ${sender}`);
 
     const opts = { nodeID: sender, ...payload }
-    this.clients_external.push(opts);
     this.clients_external.splice(this.clients_external.findIndex(c => c.nodeID === sender && c.id === payload.id), 1);
 
     this.Emitter.emit('disconnected_external', opts);
@@ -945,15 +965,16 @@ export class WSGateway {
   /**
    * Let other nodes send to a client on this server
    * 
-   * @public
-   * @param {any} payload 
+   * @private
+   * @param {external_client_send} payload 
+   * @param {any} sender 
    * @returns 
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
-  private 'ws.client.send'(payload, sender) {
+  private 'ws.client.send'(payload: external_client_send, sender) {
     const id = payload.id,
           packet: Packet = payload.packet;
 
@@ -965,7 +986,8 @@ export class WSGateway {
   /**
    * Sync props
    * 
-   * @param {any} payload 
+   * @private
+   * @param {external_client_payload} payload 
    * @param {any} sender 
    * @returns 
    * @memberof WSGateway
@@ -973,7 +995,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.update'(payload, sender) {
+  private 'ws.client.update'(payload: external_client_payload, sender) {
     if (sender === this.broker.nodeID) { return; }
     this.logger.debug(`Client ${payload.id} updated props`);
     this.clients_external.find(c => c.id === payload.id).props = payload.props;
@@ -990,5 +1012,11 @@ export class WSGateway {
   private '$node.disconnected'(payload, sender) { // Remove clients connected to the disconnected node
     this.logger.debug(`Node: ${sender} disconnected`);
     this.clients_external = this.clients_external.filter(c => c.nodeID !== sender)
+  }
+
+  // Testing output of external client's list
+  @Action()
+  private 'test.external'(ctx) {
+    return Bluebird.Promise.resolve(this.clients_external);
   }
 }
