@@ -223,9 +223,9 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
 
       //@TODO return promise and reject on error
       if (err) {
-        _self.SendResponse(new ClientError(err), PacketType.CUSTOM, ack).catch(e => _self.logger.error(e));
+        _self.SendResponse(new ClientError(err), ack).catch(e => _self.logger.error(e));
       } else {
-        _self.SendResponse(data, PacketType.CUSTOM, ack).catch(e => _self.logger.error(e));
+        _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
       }
     }
   }
@@ -239,12 +239,10 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
    */
   private messageHandler(packet: Buffer | string) : void {
     let _ack: number; // To respend if client demanded an ack on their request.
-    let _type: PacketType;
 
     this.logger.debug('Incoming message', packet);
       this.server.DecodePacket(packet).then(({ name, action, data, type, ack }) => {
         _ack = ack;
-        _type = type;
 
         if (type === PacketType.INTERNAL) { // internal defines that we can all internal method that may or may not be on this particular node.
           this.logger.debug('Internal action');
@@ -299,7 +297,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
         }
       }).then((response) => {
         if (_ack && response) {
-          return this.SendResponse(response, _type, _ack);
+          return this.SendResponse(response, _ack);
         }
       }).catch(e => {
         this.logger.error(e);
@@ -317,7 +315,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
           error = e;
         }
 
-        return this.SendResponse(error, null, _ack);
+        return this.SendResponse(error, _ack);
       }).catch(e => {
         this.logger.error('Failed to send response', e);
       });
@@ -329,8 +327,8 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
    * @param data 
    * @param ack 
    */
-  private SendResponse(data: moleculer.GenericObject, type = PacketType.INTERNAL, ack?: number) : Bluebird<{}> {
-    return this.emit(InternalNames.RESPONSE, InternalActions.ACK, type, data, ack);
+  private SendResponse(data: moleculer.GenericObject, ack?: number) : Bluebird<{}> {
+    return this.emit(InternalNames.RESPONSE, InternalActions.ACK, PacketType.INTERNAL, data, ack);
   }
 }
 
@@ -399,6 +397,7 @@ export class WSGateway {
   created() {
     //#region ugly stuff
     this.Emitter = new EventEmitter2(_.extend({
+      wildcard: true,
       newListener: false, // Prevent wildcard catching this.
     }, this.settings.eventEmitter));
     this.on = this.Emitter.on.bind(this.Emitter);
