@@ -265,7 +265,11 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
                 this.authorized = true;
                 return Bluebird.resolve(resp);
               });
+            } else {
+              return Bluebird.Promise.reject(new ClientError('Already authenticated'));
             }
+          } else {
+            return Bluebird.Promise.reject(new ClientError('Unknown action'));
           }
         } else if (type === PacketType.CUSTOM) {
           this.logger.debug('Custom action');
@@ -283,7 +287,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
                 respond(error (can be null), data_to_respond_with) // to respond to this particular request.
                 client.emit(....) // to send anything else to the client.
                 this.emit(...) // to send to everyone on this node
-                this.publish(...) // to send to everyone on all nodes
+                this.broadcast(...) // to send to everyone on all nodes
                 this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
               });
             */
@@ -293,7 +297,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
           this.logger.debug('System action');
           return this.server.CallAction(this, name, action, data);
         } else {
-          return new ClientError('Malformed packet'); // Should never reach here unless type is undefined
+          return Bluebird.Promise.reject(new ClientError('Malformed packet')); // Should never reach here unless type is undefined
         }
       }).then((response) => {
         if (_ack && response) {
@@ -342,7 +346,7 @@ export class BaseClass extends BaseSchema {
   public setMaxListeners: WSGateway['setMaxListeners']
   public send: WSGateway['send']
   public emit: WSGateway['emit']
-  public publish: WSGateway['publish']
+  public broadcast: WSGateway['broadcast']
   public clients: WSGateway['clients']
   public clients_external: WSGateway['clients_external']
   public settings: Settings;
@@ -572,7 +576,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public publish(action: string, data: moleculer.GenericObject) {
+  public broadcast(action: string, data: moleculer.GenericObject) {
     this.logger.debug('Sending to all clients on all nodes');
     this.broker.broadcast('ws.client.SendToAll', <Packet>{
       action,
