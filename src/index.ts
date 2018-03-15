@@ -24,7 +24,8 @@ interface Flags {
 
 enum InternalNames {
   RESPONSE = 'response',
-  CUSTOM = 'custom'
+  CUSTOM = 'custom',
+  EVENT = 'EVENT'
 }
 
 enum InternalActions {
