@@ -22,20 +22,16 @@ interface Flags {
   masked: boolean
 }
 
-enum InternalActions {
-  AUTH = 'auth',
-  ACK = 'ack'
-}
-
 export enum PacketType {
   EVENT,
-  ACTION
+  ACTION,
+  RESPONSE
 }
 
 export interface Packet {
   ack?: number // Should be set by client if he wants a response
   type: PacketType,
-  payload: ActionPacket | EventPacket
+  payload: ActionPacket | EventPacket | ResponsePacket
 }
 
 export interface ActionPacket {
@@ -128,7 +124,7 @@ export interface route {
   onError?(req, res, err): void
 }
 
-type encryption = (packet: ActionPacket | EventPacket | ResponsePacket) => Bluebird<Buffer | string | any>;
+type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Bluebird<ActionPacket>;
 
@@ -196,7 +192,10 @@ class Client {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({ event, data }).then(result => { 
+      this.server.EncodePacket({
+        payload: { event, data },
+        type: PacketType.EVENT
+      }).then(result => { 
         this.socket.send(result)
         resolve();
       }).catch(reject);
@@ -242,10 +241,10 @@ class Client {
         _ack = result.ack;
 
         if (result.type === PacketType.ACTION) {
-          const { action, data} = <ActionPacket>result.payload
+          const { name, action, data} = <ActionPacket>result.payload
 
           this.logger.debug('Action packet');
-          if (action === InternalActions.AUTH) {
+          if (name === 'internal' && action === 'auth') {
             this.logger.debug('Auth action');
             if (!this.authorized) {
               if (this.server.settings.externalAuth && this.server.settings.externalAuth.enabled) {
@@ -331,7 +330,10 @@ class Client {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({ id: ack, data: data }).then(result => { 
+      this.server.EncodePacket({
+        type: PacketType.RESPONSE,
+        payload: { id: ack, data: data }
+      }).then(result => { 
         this.socket.send(result)
         resolve();
       }).catch(reject);
@@ -700,7 +702,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public EncodePacket(packet: ActionPacket | EventPacket | ResponsePacket): Bluebird<Buffer | string> {
+  public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
     return new Bluebird.Promise((resolve, reject) => {
       try {
         if(_.isFunction(this.settings.encryption)) {
