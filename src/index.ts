@@ -7,7 +7,7 @@
 import http       = require('http');
 import https      = require('https');
 import moleculer  = require('moleculer');
-import uws        = require('uws');
+import uws        = require('uws'); // Maybe add support for turbo-ws as well? (once it reached 1.0) https://github.com/hugmanrique/turbo-ws
 import timer      = require('nanotimer');
 import _          = require('lodash');
 import nanomatch  = require('nanomatch');
@@ -22,29 +22,36 @@ interface Flags {
   masked: boolean
 }
 
-enum InternalNames {
-  RESPONSE = 'response',
-  CUSTOM = 'custom',
-  EVENT = 'EVENT'
-}
-
 enum InternalActions {
   AUTH = 'auth',
   ACK = 'ack'
 }
 
 export enum PacketType {
-  INTERNAL,
-  CUSTOM,
-  SYSTEM
+  EVENT,
+  ACTION
 }
 
 export interface Packet {
-  name: string | InternalNames,
+  ack?: number // Should be set by client if he wants a response
+  type: PacketType,
+  payload: ActionPacket | EventPacket
+}
+
+export interface ActionPacket {
+  name: string,
   action: string,
-  data: any,
-  type: PacketType
-  ack?: number
+  data: moleculer.GenericObject
+}
+
+export interface EventPacket {
+  event: string,
+  data: moleculer.GenericObject
+}
+
+interface ResponsePacket {
+  id: number,
+  data: moleculer.GenericObject
 }
 
 export interface Settings {
@@ -80,7 +87,7 @@ interface external_client_payload {
 
 interface external_client_send {
   id: string,
-  packet: Packet
+  packet: EventPacket
 }
 
 // @TODO 
@@ -121,22 +128,13 @@ export interface route {
   onError?(req, res, err): void
 }
 
-type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
+type encryption = (packet: ActionPacket | EventPacket | ResponsePacket) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
-type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Bluebird<Packet>;
+type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Bluebird<ActionPacket>;
 
 class Client {
   private readonly server: WSGateway;
   private logger: moleculer.LoggerInstance;
-  private readonly Emitter: EventEmitter2 = new EventEmitter2();
-
-  public on: EventEmitter2['on'] = this.Emitter.on.bind(this.Emitter);
-  public once: EventEmitter2['once'] = this.Emitter.on.bind(this.Emitter);
-  public onAny: EventEmitter2['onAny'] = this.Emitter.onAny.bind(this.Emitter);
-  public many: EventEmitter2['many'] = this.Emitter.many.bind(this.Emitter);
-  public addListener: EventEmitter2['addListener'] = this.Emitter.addListener.bind(this.Emitter);
-  public removeListener: EventEmitter2['removeListener'] = this.Emitter.removeListener.bind(this.Emitter);
-  public removeAllListeners: EventEmitter2['removeAllListeners'] = this.Emitter.removeAllListeners.bind(this.Emitter);
   public readonly id: string = shortid.generate();
   public readonly socket: uws;
   public authorized: boolean = false;
@@ -186,43 +184,41 @@ class Client {
   /**
    * Send to client
    * 
-   * @param {string} name 
-   * @param {string} action 
-   * @param {PacketType} type 
-   * @param {moleculer.ActionParams} data 
-   * @param {number} [ack] 
+   * @param {string} event 
+   * @param {object} data 
    * @returns {Bluebird<{}>} 
    * @memberof Client
    */
-  public emit(name: string, action: string, type: PacketType, data: moleculer.ActionParams, ack?: number) : Bluebird<{}> {
-    return new Bluebird.Promise(async (resolve, reject) => {
+  public emit(event: string, data: object) : Bluebird<{}> {
+    return new Bluebird.Promise((resolve, reject) => {
 
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({ name, action, type, data, ack }).then(result => this.socket.send(result)).catch(reject);
+      this.server.EncodePacket({ event, data }).then(result => { 
+        this.socket.send(result)
+        resolve();
+      }).catch(reject);
     });
   }
 
-/**
- * Send response to custom action
- * 
- * @public
- * @param {any} action 
- * @param {any} data 
- * @param {any} [ack] 
- * @returns {(err: any, data: any) => void} 
- * @memberof Client
- */
-public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
+  /**
+   * Handler to allow a response to an event
+   * 
+   * @public
+   * @param {any} data 
+   * @param {any} [ack] 
+   * @returns {(err: any, data: any) => void} 
+   * @memberof Client
+   */
+  public ResponseCallback(data, ack?) : (err: any, data: any) => void {
     const _self = this;
     return function(err, data) {
       if (!ack) { // No need to send back a response if the clien't doesn't want one.
         return;
       }
 
-      //@TODO return promise and reject on error
       if (err) {
         _self.SendResponse(new ClientError(err), ack).catch(e => _self.logger.error(e));
       } else {
@@ -239,19 +235,21 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
    * @memberof Client
    */
   private messageHandler(packet: Buffer | string) : void {
-    let _ack: number; // To respend if client demanded an ack on their request.
+    let _ack: number; // To respend if client want a response;
 
     this.logger.debug('Incoming message', packet);
-      this.server.DecodePacket(packet).then(({ name, action, data, type, ack }) => {
-        _ack = ack;
+      this.server.DecodePacket(packet).then((result) => {
+        _ack = result.ack;
 
-        if (type === PacketType.INTERNAL) { // internal defines that we can all internal method that may or may not be on this particular node.
-          this.logger.debug('Internal action');
+        if (result.type === PacketType.ACTION) {
+          const { action, data} = <ActionPacket>result.payload
+
+          this.logger.debug('Action packet');
           if (action === InternalActions.AUTH) {
-            this.logger.debug('Internal auth');
+            this.logger.debug('Auth action');
             if (!this.authorized) {
               if (this.server.settings.externalAuth && this.server.settings.externalAuth.enabled) {
-                this.logger.debug('External auth method');
+                this.logger.debug('External auth action');
 
                 const endpoint = this.server.settings.externalAuth.endpoint.split('.');
 
@@ -261,7 +259,7 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
                 });
               }
 
-              this.logger.debug('Internal auth method');
+              this.logger.debug('Internal auth action');
               return Bluebird.Promise.method(this.server.methods.authorize)(data).then(resp => {
                 this.authorized = true;
                 return Bluebird.resolve(resp);
@@ -270,33 +268,24 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
               return Bluebird.Promise.reject(new ClientError('Already authenticated'));
             }
           } else {
-            return Bluebird.Promise.reject(new ClientError('Unknown action'));
+            this.logger.debug('User defined system action');
+            return this.server.CallAction(this, name, action, data);
           }
-        } else if (type === PacketType.CUSTOM) {
-          this.logger.debug('Custom action');
+        } else if (result.type === PacketType.EVENT) {
+          const { event, data } = <EventPacket>result.payload;
 
-            /** 
-             * Do we actually need both emitters?
-            */
-
-            // Client listener
-            this.Emitter.emit(action, data, this.ResponseCallback(action, data, ack)); // Add a callback function so we can allow a response
-
-            // Server listener
+          // Server listener
             /* Works as: 
               this.on('action_name', (data, client, respond) => {
-                respond(error (can be null), data_to_respond_with) // to respond to this particular request.
+                respond(error, data_to_respond_with) // to respond to this particular request.
                 client.emit(....) // to send anything else to the client.
                 this.emit(...) // to send to everyone on this node
                 this.broadcast(...) // to send to everyone on all nodes
                 this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
               });
             */
-            this.server.Emitter.emit(action, data, this, this.ResponseCallback(action, data, ack)); // Add a callback function so we can allow a response
-            return Bluebird.Promise.resolve();
-        } else if (type === PacketType.SYSTEM) { // System defines that we call a moleculer action
-          this.logger.debug('System action');
-          return this.server.CallAction(this, name, action, data);
+           this.server.Emitter.emit(event, data, this, this.ResponseCallback(data, _ack)); // Add a callback function so we can allow a response
+           return Bluebird.Promise.resolve();
         } else {
           return Bluebird.Promise.reject(new ClientError('Malformed packet')); // Should never reach here unless type is undefined
         }
@@ -327,13 +316,26 @@ public ResponseCallback(action, data, ack?) : (err: any, data: any) => void {
   }
 
   /**
-   * SendResponse
+   * Send response
    * 
-   * @param data 
-   * @param ack 
+   * @private
+   * @param {moleculer.GenericObject} data 
+   * @param {number} ack 
+   * @returns {Bluebird<{}>} 
+   * @memberof Client
    */
-  private SendResponse(data: moleculer.GenericObject, ack?: number) : Bluebird<{}> {
-    return this.emit(InternalNames.RESPONSE, InternalActions.ACK, PacketType.INTERNAL, data, ack);
+  private SendResponse(data: moleculer.GenericObject, ack: number) : Bluebird<{}> {
+    return new Bluebird.Promise((resolve, reject) => {
+
+      if (this.socket.readyState !== this.socket.OPEN) {
+        reject(new SocketNotOpen());
+      }
+
+      this.server.EncodePacket({ id: ack, data: data }).then(result => { 
+        this.socket.send(result)
+        resolve();
+      }).catch(reject);
+    });
   }
 }
 
@@ -529,13 +531,13 @@ export class WSGateway {
    * Send to a specific client with id
    * 
    * @param {string} id 
-   * @param {string} action 
+   * @param {string} event 
    * @param {moleculer.GenericObject} data 
    * @param {boolean} [isExternal] is only applied when its coming from an external node to prevent a race condition which shouldn't exist.
    * @memberof WSGateway
    */
   @Method
-  public send(id: string, action: string, data: moleculer.GenericObject, isExternal?: boolean) {
+  public send(id: string, event: string, data: moleculer.GenericObject, isExternal?: boolean) : void {
     const client: Client = this.clients.find(c => c.id === id);
 
     if (!client && !isExternal) {
@@ -543,8 +545,8 @@ export class WSGateway {
 
       if (external) {
         this.logger.debug(`Sending to a client with id: ${id} on node ${external.nodeID}`);
-        this.broker.emit('ws.client.send', <Packet>{
-          action,
+        this.broker.emit('ws.client.send', <EventPacket>{
+          event,
           data
         }, external.nodeID);
       } else {
@@ -552,39 +554,39 @@ export class WSGateway {
       }
     } else {
       this.logger.debug(`Sending to a client with id: ${id}`);
-      client.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)
+      client.emit(event, data)
     }
   }
 
   /**
    * Send to all clients on this node
    * 
-   * @param {string} action 
+   * @param {string} event 
    * @param {moleculer.GenericObject} data 
    * @memberof WSGateway
    */
   @Method
-  public emit(action: string, data: moleculer.GenericObject) {
+  public emit(event: string, data: moleculer.GenericObject) : void {
     this.logger.debug('Sending to all clients on this node');
-    this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
+    this.clients.map(u => u.emit(event, data)); // Map is faster than for loop
   }
 
   /**
    * Send to all clients on all nodes
    * 
-   * @param {string} action 
+   * @param {string} event 
    * @param {moleculer.GenericObject} data 
    * @memberof WSGateway
    */
   @Method
-  public broadcast(action: string, data: moleculer.GenericObject) {
+  public broadcast(event: string, data: moleculer.GenericObject) : void {
     this.logger.debug('Sending to all clients on all nodes');
-    this.broker.broadcast('ws.client.SendToAll', <Packet>{
-      action,
+    this.broker.broadcast('ws.client.SendToAll', <EventPacket>{
+      event,
       data
     }, 'ws')
     
-    this.clients.map(u => u.emit(InternalNames.CUSTOM, action, PacketType.CUSTOM, data)); // Map is faster than for loop
+    this.emit(event, data);
   }
 
   /**
@@ -698,7 +700,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
+  public EncodePacket(packet: ActionPacket | EventPacket | ResponsePacket): Bluebird<Buffer | string> {
     return new Bluebird.Promise((resolve, reject) => {
       try {
         if(_.isFunction(this.settings.encryption)) {
@@ -960,10 +962,10 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.SendToAll'(payload: Packet, sender) {
+  private 'ws.client.SendToAll'(payload: EventPacket, sender) {
     if (sender === this.broker.nodeID) { return; }
     this.logger.debug(`${sender} requested send to all`);
-    return this.emit(payload.action, payload.data);
+    return this.emit(payload.event, payload.data);
   }
 
   /**
@@ -980,11 +982,11 @@ export class WSGateway {
   })
   private 'ws.client.send'(payload: external_client_send, sender) {
     const id = payload.id,
-          packet: Packet = payload.packet;
+          packet: EventPacket = payload.packet;
 
     this.logger.debug(`Sending to ${id} from node: ${sender}`);
 
-    return this.send(id, packet.action, packet.data, true);
+    return this.send(id, packet.event, packet.data, true);
   }
 
   /**
