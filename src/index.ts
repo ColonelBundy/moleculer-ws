@@ -7,7 +7,7 @@
 import http = require('http');
 import https = require('https');
 import moleculer = require('moleculer');
-import uws = require('uws'); // Maybe add support for turbo-ws as well? (once it reached 1.0) https://github.com/hugmanrique/turbo-ws
+import uws = require('uws'); // Maybe add support for turbo-ws as well? (once it has reached 1.0) https://github.com/hugmanrique/turbo-ws
 import timer = require('nanotimer');
 import _ = require('lodash');
 import nanomatch = require('nanomatch');
@@ -40,13 +40,14 @@ interface Flags {
 export enum PacketType {
   EVENT,
   ACTION,
-  RESPONSE
+  RESPONSE,
+  PROPS
 }
 
 export interface Packet {
   ack?: number; // Should be set by client if he wants a response
   type: PacketType;
-  payload: ActionPacket | EventPacket | ResponsePacket;
+  payload: ActionPacket | EventPacket | ResponsePacket | object;
 }
 
 export interface ActionPacket {
@@ -103,7 +104,7 @@ interface external_client_send {
 
 // @TODO
 // * Convert to class
-// * add functions that when called gets executed on node where the client lives, eg: .emit/.send
+// * add functions that when called gets executed on node where the client lives, eg: .emit/.call
 interface external_client extends external_client_payload {
   nodeID: string;
 }
@@ -148,11 +149,6 @@ export interface route {
 
 type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
-type authorize = (
-  ctx: moleculer.Context,
-  route?: route,
-  params?: moleculer.ActionParams
-) => Bluebird<ActionPacket>;
 
 class Client {
   private readonly server: WSGateway;
@@ -175,7 +171,7 @@ class Client {
     this.server = _server;
     this.logger = this.server.broker.logger;
 
-    // Sync prop updates to all nodes, if you were to modify the object, it'll send an update to the client automatically.
+    // Sync prop updates to all nodes, if you were to modify the object,
     this.props = new Proxy(
       {},
       {
@@ -190,6 +186,16 @@ class Client {
             },
             'ws'
           );
+
+          // Send update to client as well.
+          if (this.socket.readyState === this.socket.OPEN) {
+            this.server
+              .EncodePacket({
+                payload: obj,
+                type: PacketType.PROPS
+              })
+              .then(payload => this.socket.send(payload));
+          }
 
           return true;
         }
@@ -307,12 +313,15 @@ class Client {
               }
 
               this.logger.debug('Internal auth action');
-              return Bluebird.Promise.method(this.server.methods.authorize)(
-                data
-              ).then(resp => {
-                this.authorized = true;
-                return Bluebird.resolve(resp);
-              });
+              return Bluebird.Promise.method(this.server.authorize)
+                .call(this, this, data)
+                .then(resp => {
+                  this.authorized = true;
+                  return Bluebird.resolve(resp);
+                })
+                .catch(e => {
+                  return Bluebird.reject(new ClientError(e));
+                });
             } else {
               return Bluebird.Promise.reject(
                 new ClientError('Already authenticated')
@@ -451,7 +460,7 @@ export class WSGateway {
   public broker: moleculer.ServiceBroker;
   public methods: any;
   public logger: moleculer.LoggerInstance;
-  private authorization = (ctx: moleculer.Context, route: route) => {};
+  public authorize = (client: Client, data: moleculer.GenericObject) => {};
   // end hacks
 
   public settings: Settings = {
@@ -459,6 +468,7 @@ export class WSGateway {
     ip: process.env.IP || '0.0.0.0',
     perMessageDeflate: false,
     path: '/',
+    encryption: 'Binary',
     routes: [],
     heartbeat: {
       enabled: true,
@@ -914,7 +924,7 @@ export class WSGateway {
   private ProcessRoute(route: route): route {
     // Check if we have a valid authorization method.
     if (route.authorization) {
-      if (!_.isFunction(this.authorization)) {
+      if (!_.isFunction(this.authorize)) {
         this.logger.warn(
           'No authorization method, please define one to use authorization. Route will now be unprotected.'
         );
