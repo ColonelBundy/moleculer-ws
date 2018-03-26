@@ -4,22 +4,37 @@
  * MIT Licensed
  */
 
-import http       = require('http');
-import https      = require('https');
-import moleculer  = require('moleculer');
-import uws        = require('uws'); // Maybe add support for turbo-ws as well? (once it reached 1.0) https://github.com/hugmanrique/turbo-ws
-import timer      = require('nanotimer');
-import _          = require('lodash');
-import nanomatch  = require('nanomatch');
-import shortid    = require('shortid');
-import Bluebird   = require('bluebird');
-import { Service, Action, Event, Method, BaseSchema } from 'moleculer-decorators';
+import http = require('http');
+import https = require('https');
+import moleculer = require('moleculer');
+import uws = require('uws'); // Maybe add support for turbo-ws as well? (once it reached 1.0) https://github.com/hugmanrique/turbo-ws
+import timer = require('nanotimer');
+import _ = require('lodash');
+import nanomatch = require('nanomatch');
+import shortid = require('shortid');
+import Bluebird = require('bluebird');
+import {
+  Service,
+  Action,
+  Event,
+  Method,
+  BaseSchema
+} from 'moleculer-decorators';
 import { EventEmitter2 } from 'eventemitter2';
-import { SocketNotOpen, NotAuthorized, RouteNotFound, ClientError, EncodeError, DecodeError, EndpointNotAvailable, ServiceNotAvailable } from './errors';
+import {
+  SocketNotOpen,
+  NotAuthorized,
+  RouteNotFound,
+  ClientError,
+  EncodeError,
+  DecodeError,
+  EndpointNotAvailable,
+  ServiceNotAvailable
+} from './errors';
 
 interface Flags {
-  binary: boolean,
-  masked: boolean
+  binary: boolean;
+  masked: boolean;
 }
 
 export enum PacketType {
@@ -29,104 +44,115 @@ export enum PacketType {
 }
 
 export interface Packet {
-  ack?: number // Should be set by client if he wants a response
-  type: PacketType,
-  payload: ActionPacket | EventPacket | ResponsePacket
+  ack?: number; // Should be set by client if he wants a response
+  type: PacketType;
+  payload: ActionPacket | EventPacket | ResponsePacket;
 }
 
 export interface ActionPacket {
-  name: string,
-  action: string,
-  data: moleculer.GenericObject
+  name: string;
+  action: string;
+  data: any;
 }
 
 export interface EventPacket {
-  event: string,
-  data: moleculer.GenericObject
+  event: string;
+  data: any;
 }
 
 interface ResponsePacket {
-  id: number,
-  data: moleculer.GenericObject
+  id: number;
+  data: any;
 }
 
 export interface Settings {
-  port: number,
-  ip?: string,
+  port: number;
+  ip?: string;
   externalAuth?: {
-    enabled: boolean,
-    endpoint: string // eg: 'users.auth' where 'users' is the service and 'auth' the action 
-  },
+    enabled: boolean;
+    endpoint: string; // eg: 'users.auth' where 'users' is the service and 'auth' the action
+  };
   heartbeat?: {
-    enabled: boolean,
-    interval?: number
-  },
+    enabled: boolean;
+    interval?: number;
+  };
   eventEmitter?: {
-    wildcard: boolean,
-    maxListeners: number
-  },
-  perMessageDeflate?: boolean,
-  encryption?: 'Binary' | 'JSON' | encryption,
-  decryption?: decryption,
-  path: string,
-  routes?: route[],
+    wildcard: boolean;
+    maxListeners: number;
+  };
+  perMessageDeflate?: boolean;
+  encryption?: 'Binary' | 'JSON' | encryption;
+  decryption?: decryption;
+  path: string;
+  routes?: route[];
   https?: {
-    key: string,
-    cert: string
-  }
+    key: string;
+    cert: string;
+  };
 }
 
 interface external_client_payload {
-  id: string,
-  props: moleculer.GenericObject
+  id: string;
+  props: moleculer.GenericObject;
 }
 
 interface external_client_send {
-  id: string,
-  packet: EventPacket
+  id: string;
+  packet: EventPacket;
 }
 
-// @TODO 
+// @TODO
 // * Convert to class
 // * add functions that when called gets executed on node where the client lives, eg: .emit/.send
 interface external_client extends external_client_payload {
-  nodeID: string,
+  nodeID: string;
 }
 
 export interface callOptions {
-  timeout: number,
-  retryCount: number,
-  fallbackResponse(ctx, err): void
+  timeout: number;
+  retryCount: number;
+  fallbackResponse(ctx, err): void;
 }
 
 export interface aliases {
-  [name: string]: string
+  [name: string]: string;
 }
 
 export interface Request {
-  action: string,
+  action: string;
   sender: {
-    id: string,
-    props: moleculer.GenericObject
-  },
-  params: moleculer.ActionParams
+    id: string;
+    props: moleculer.GenericObject;
+  };
+  params: moleculer.ActionParams;
 }
 
 export interface route {
-  name: string,
-  aliases?: aliases,
-  whitelist?: string[],
-  authorization?: boolean,
-  mappingPolicy?: 'strict' | 'all',
-  onAfterCall?(ctx: moleculer.Context, req: Request, res: any): Bluebird<moleculer.Context | moleculer.GenericObject>,
-  onBeforeCall?(ctx: moleculer.Context, req: Request): Bluebird<moleculer.Context | moleculer.GenericObject>,
-  callOptions?: callOptions,
-  onError?(req, res, err): void
+  name: string;
+  aliases?: aliases;
+  whitelist?: string[];
+  authorization?: boolean;
+  mappingPolicy?: 'strict' | 'all';
+  onAfterCall?(
+    ctx: moleculer.Context,
+    req: Request,
+    res: any
+  ): Bluebird<moleculer.Context | moleculer.GenericObject>;
+  onBeforeCall?(
+    ctx: moleculer.Context,
+    req: Request
+  ): Bluebird<moleculer.Context | moleculer.GenericObject>;
+  callOptions?: callOptions;
+  onError?(req, res, err): void;
 }
 
 type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
-type authorize = (ctx: moleculer.Context, route?: route, params?: moleculer.ActionParams) => Bluebird<ActionPacket>;
+type authorize = (
+  ctx: moleculer.Context,
+  route?: route,
+  params?: moleculer.ActionParams
+) => Bluebird<ActionPacket>;
 
 class Client {
   private readonly server: WSGateway;
@@ -137,11 +163,11 @@ class Client {
   public props: moleculer.GenericObject = {}; // Store for username etc..
   public alive: boolean = true;
   public ack_id: 0;
-  
+
   /**
    * Creates an instance of Client.
-   * @param {uws} _socket 
-   * @param {WSGateway} _server 
+   * @param {uws} _socket
+   * @param {WSGateway} _server
    * @memberof Client
    */
   constructor(_socket: uws, _server: WSGateway) {
@@ -150,121 +176,147 @@ class Client {
     this.logger = this.server.broker.logger;
 
     // Sync prop updates to all nodes, if you were to modify the object, it'll send an update to the client automatically.
-    this.props = new Proxy({}, {
-      set: (obj, prop, value) => {
-        obj[prop] = value;
+    this.props = new Proxy(
+      {},
+      {
+        set: (obj, prop, value) => {
+          obj[prop] = value;
 
-        this.server.broker.broadcast('ws.client.update', {
-          id: this.id,
-          props: obj
-        }, 'ws')
+          this.server.broker.broadcast(
+            'ws.client.update',
+            {
+              id: this.id,
+              props: obj
+            },
+            'ws'
+          );
 
-        return true;
+          return true;
+        }
       }
-    })
+    );
 
     this.socket.on('message', this.messageHandler.bind(this));
-    this.socket.on('pong', () => this.alive = true);
+    this.socket.on('pong', () => (this.alive = true));
   }
 
   /**
    * Close client connection
-   * 
+   *
    * @memberof Client
    */
-  public Close() : void {
-    if (this.socket.readyState === this.socket.OPEN)
-      this.socket.close();
+  public Close(): void {
+    if (this.socket.readyState === this.socket.OPEN) this.socket.close();
   }
 
   /**
    * Send to client
-   * 
-   * @param {string} event 
-   * @param {object} data 
-   * @returns {Bluebird<{}>} 
+   *
+   * @param {string} event
+   * @param {object} data
+   * @returns {Bluebird<{}>}
    * @memberof Client
    */
-  public emit(event: string, data: object) : Bluebird<{}> {
+  public emit(event: string, data: object): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
-
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({
-        payload: { event, data },
-        type: PacketType.EVENT
-      }).then(result => { 
-        this.socket.send(result)
-        resolve();
-      }).catch(reject);
+      this.server
+        .EncodePacket({
+          payload: { event, data },
+          type: PacketType.EVENT
+        })
+        .then(result => {
+          this.socket.send(result);
+          resolve();
+        })
+        .catch(reject);
     });
   }
 
   /**
    * Handler to allow a response to an event
-   * 
+   *
    * @public
-   * @param {any} data 
-   * @param {any} [ack] 
-   * @returns {(err: any, data: any) => void} 
+   * @param {any} data
+   * @param {any} [ack]
+   * @returns {(err: any, data: any) => void}
    * @memberof Client
    */
-  public ResponseCallback(data, ack?) : (err: any, data: any) => void {
+  public ResponseCallback(data, ack?): (err: any, data?: any) => void {
     const _self = this;
-    return function(err, data) {
-      if (!ack) { // No need to send back a response if the clien't doesn't want one.
+    return function(err, data?) {
+      if (_.isNil(ack)) {
+        // No need to send back a response if the clien't doesn't want one.
         return;
       }
 
       if (err) {
-        _self.SendResponse(new ClientError(err), ack).catch(e => _self.logger.error(e));
+        _self
+          .SendResponse(new ClientError(err), ack)
+          .catch(e => _self.logger.error(e));
       } else {
         _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
       }
-    }
+    };
   }
 
   /**
    * Handle incomming packets
-   * 
+   *
    * @private
-   * @param {(Buffer | string)} packet 
+   * @param {(Buffer | string)} packet
    * @memberof Client
    */
-  private messageHandler(packet: Buffer | string) : void {
+  private messageHandler(packet: Buffer | string): void {
     let _ack: number; // To respend if client want a response;
 
     this.logger.debug('Incoming message', packet);
-      this.server.DecodePacket(packet).then((result) => {
+    this.server
+      .DecodePacket(packet)
+      .then(result => {
         _ack = result.ack;
 
+        this.logger.info('ACK: ', _ack);
+
         if (result.type === PacketType.ACTION) {
-          const { name, action, data} = <ActionPacket>result.payload
+          const { name, action, data } = <ActionPacket>result.payload;
 
           this.logger.debug('Action packet');
           if (name === 'internal' && action === 'auth') {
             this.logger.debug('Auth action');
             if (!this.authorized) {
-              if (this.server.settings.externalAuth && this.server.settings.externalAuth.enabled) {
+              if (
+                this.server.settings.externalAuth &&
+                this.server.settings.externalAuth.enabled
+              ) {
                 this.logger.debug('External auth action');
 
-                const endpoint = this.server.settings.externalAuth.endpoint.split('.');
+                const endpoint = this.server.settings.externalAuth.endpoint.split(
+                  '.'
+                );
 
-                return this.server.CallAction(this, endpoint[0], endpoint[1], data).then(resp => {
-                  this.authorized = true;
-                  return Bluebird.resolve(resp);
-                });
+                return this.server
+                  .CallAction(this, endpoint[0], endpoint[1], data)
+                  .then(resp => {
+                    this.authorized = true;
+                    return Bluebird.resolve(resp);
+                  });
               }
 
               this.logger.debug('Internal auth action');
-              return Bluebird.Promise.method(this.server.methods.authorize)(data).then(resp => {
+              return Bluebird.Promise.method(this.server.methods.authorize)(
+                data
+              ).then(resp => {
                 this.authorized = true;
                 return Bluebird.resolve(resp);
               });
             } else {
-              return Bluebird.Promise.reject(new ClientError('Already authenticated'));
+              return Bluebird.Promise.reject(
+                new ClientError('Already authenticated')
+              );
             }
           } else {
             this.logger.debug('User defined system action');
@@ -274,7 +326,7 @@ class Client {
           const { event, data } = <EventPacket>result.payload;
 
           // Server listener
-            /* Works as: 
+          /* Works as: 
               this.on('action_name', (data, client, respond) => {
                 respond(error, data_to_respond_with) // to respond to this particular request.
                 client.emit(....) // to send anything else to the client.
@@ -283,16 +335,23 @@ class Client {
                 this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
               });
             */
-           this.server.Emitter.emit(event, data, this, this.ResponseCallback(data, _ack)); // Add a callback function so we can allow a response
-           return Bluebird.Promise.resolve();
+          this.server.Emitter.emit(
+            event,
+            data,
+            this,
+            this.ResponseCallback(data, _ack)
+          ); // Add a callback function so we can allow a response
+          return Bluebird.Promise.resolve();
         } else {
           return Bluebird.Promise.reject(new ClientError('Malformed packet')); // Should never reach here unless type is undefined
         }
-      }).then((response) => {
-        if (_ack && response) {
+      })
+      .then(response => {
+        if (_ack > -1 && response) {
           return this.SendResponse(response, _ack);
         }
-      }).catch(e => {
+      })
+      .catch(e => {
         this.logger.error(e);
         let error = new ClientError('Unexpected error');
 
@@ -309,54 +368,81 @@ class Client {
         }
 
         return this.SendResponse(error, _ack);
-      }).catch(e => {
+      })
+      .catch(e => {
         this.logger.error('Failed to send response', e);
       });
   }
 
   /**
    * Send response
-   * 
+   *
    * @private
-   * @param {moleculer.GenericObject} data 
-   * @param {number} ack 
-   * @returns {Bluebird<{}>} 
+   * @param {moleculer.GenericObject} data
+   * @param {number} ack
+   * @returns {Bluebird<{}>}
    * @memberof Client
    */
-  private SendResponse(data: moleculer.GenericObject, ack: number) : Bluebird<{}> {
+  private SendResponse(
+    data: moleculer.GenericObject,
+    ack: number
+  ): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
-
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new SocketNotOpen());
       }
 
-      this.server.EncodePacket({
-        type: PacketType.RESPONSE,
-        payload: { id: ack, data: data }
-      }).then(result => { 
-        this.socket.send(result)
-        resolve();
-      }).catch(reject);
+      this.server
+        .EncodePacket({
+          type: PacketType.RESPONSE,
+          payload: { id: ack, data: data }
+        })
+        .then(result => {
+          this.socket.send(result);
+          resolve();
+        })
+        .catch(reject);
     });
   }
 }
 
 // Only for type support
 export class BaseClass extends BaseSchema {
-  public on: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
-  public once: (event: string, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
-  public many: (event: string, timesTolisten: number, callback: (data: any, client: Client, respond: (error: string, data: any) => void) => void) => void;
-  public removeListener: WSGateway['removeListener']
-  public removeAllListeners: WSGateway['removeAllListeners']
-  public setMaxListeners: WSGateway['setMaxListeners']
-  public send: WSGateway['send']
-  public emit: WSGateway['emit']
-  public broadcast: WSGateway['broadcast']
-  public clients: WSGateway['clients']
-  public clients_external: WSGateway['clients_external']
+  public on: (
+    event: string,
+    callback: (
+      data: any,
+      client: Client,
+      respond: (error: string, data?: any) => void
+    ) => void
+  ) => void;
+  public once: (
+    event: string,
+    callback: (
+      data: any,
+      client: Client,
+      respond: (error: string, data: any) => void
+    ) => void
+  ) => void;
+  public many: (
+    event: string,
+    timesTolisten: number,
+    callback: (
+      data: any,
+      client: Client,
+      respond: (error: string, data: any) => void
+    ) => void
+  ) => void;
+  public removeListener: WSGateway['removeListener'];
+  public removeAllListeners: WSGateway['removeAllListeners'];
+  public setMaxListeners: WSGateway['setMaxListeners'];
+  public send: WSGateway['send'];
+  public emit: WSGateway['emit'];
+  public broadcast: WSGateway['broadcast'];
+  public clients: WSGateway['clients'];
+  public clients_external: WSGateway['clients_external'];
   public settings: Settings;
 }
-
 
 @Service()
 export class WSGateway {
@@ -365,7 +451,7 @@ export class WSGateway {
   public broker: moleculer.ServiceBroker;
   public methods: any;
   public logger: moleculer.LoggerInstance;
-  private authorization = (ctx: moleculer.Context, route: route) => {}
+  private authorization = (ctx: moleculer.Context, route: route) => {};
   // end hacks
 
   public settings: Settings = {
@@ -378,7 +464,7 @@ export class WSGateway {
       enabled: true,
       interval: 30000
     }
-  }
+  };
 
   public Emitter: EventEmitter2;
   public on: EventEmitter2['on'];
@@ -393,8 +479,8 @@ export class WSGateway {
   public clients: Client[] = []; // List of clients connected to this node
   public clients_external: external_client[] = []; // Replicated list of clients on other nodes
   private isHTTPS: boolean = false;
-  private server: uws.Server
-  private webServer: http.Server | https.Server
+  private server: uws.Server;
+  private webServer: http.Server | https.Server;
   private heartbeatEnabled: boolean = false;
   private heartbeatTimer: timer;
 
@@ -405,22 +491,36 @@ export class WSGateway {
    */
   created() {
     //#region ugly stuff
-    this.Emitter = new EventEmitter2(_.extend({
-      wildcard: true,
-      newListener: false, // Prevent wildcard catching this.
-    }, this.settings.eventEmitter));
+    this.Emitter = new EventEmitter2(
+      _.extend(
+        {
+          wildcard: true,
+          newListener: false // Prevent wildcard catching this.
+        },
+        this.settings.eventEmitter
+      )
+    );
     this.on = this.Emitter.on.bind(this.Emitter);
     this.once = this.Emitter.on.bind(this.Emitter);
     this.onAny = this.Emitter.onAny.bind(this.Emitter);
     this.many = this.Emitter.many.bind(this.Emitter);
     this.addListener = this.Emitter.addListener.bind(this.Emitter);
     this.removeListener = this.Emitter.removeListener.bind(this.Emitter);
-    this.removeAllListeners = this.Emitter.removeAllListeners.bind(this.Emitter);
+    this.removeAllListeners = this.Emitter.removeAllListeners.bind(
+      this.Emitter
+    );
     this.setMaxListeners = this.Emitter.setMaxListeners.bind(this.Emitter);
     //#endregion
 
-    if (this.settings.https && this.settings.https.key && this.settings.https.cert) {
-      this.webServer = https.createServer(this.settings.https, this.httphandler);
+    if (
+      this.settings.https &&
+      this.settings.https.key &&
+      this.settings.https.cert
+    ) {
+      this.webServer = https.createServer(
+        this.settings.https,
+        this.httphandler
+      );
       this.isHTTPS = true;
     } else {
       this.webServer = http.createServer(this.httphandler);
@@ -435,7 +535,9 @@ export class WSGateway {
     });
 
     if (_.isArray(this.settings.routes)) {
-      this.settings.routes = this.settings.routes.map(route => this.ProcessRoute(route));
+      this.settings.routes = this.settings.routes.map(route =>
+        this.ProcessRoute(route)
+      );
     }
 
     // Pre check
@@ -446,7 +548,9 @@ export class WSGateway {
       }
     }
 
-    shortid.worker(process.env.NODE_UNIQUE_ID || Math.floor(Math.random() * 17)) // See https://www.npmjs.com/package/shortid for more info
+    shortid.worker(
+      process.env.NODE_UNIQUE_ID || Math.floor(Math.random() * 17)
+    ); // See https://www.npmjs.com/package/shortid for more info
   }
 
   /**
@@ -455,11 +559,14 @@ export class WSGateway {
    */
   started() {
     this.webServer.listen(this.settings.port, this.settings.ip, err => {
-      if (err)
-        return this.logger.error('WS Gateway listen error!', err);
+      if (err) return this.logger.error('WS Gateway listen error!', err);
 
       const addr = this.webServer.address();
-      this.logger.info(`WS Gateway listening on ${this.isHTTPS ? 'https' : 'http'}://${addr.address}:${addr.port}`);
+      this.logger.info(
+        `WS Gateway listening on ${this.isHTTPS ? 'https' : 'http'}://${
+          addr.address
+        }:${addr.port}`
+      );
     });
 
     if (this.settings.heartbeat.enabled && !this.heartbeatEnabled)
@@ -478,18 +585,20 @@ export class WSGateway {
       Bluebird.all([
         Bluebird.promisify(this.server.close),
         Bluebird.promisify(this.webServer.close)
-      ]).then(() => {
-        this.logger.info('WS Gateway stopped!');
-      }).catch(e => this.logger.error('WS Gateway close error!', e));
-		}
+      ])
+        .then(() => {
+          this.logger.info('WS Gateway stopped!');
+        })
+        .catch(e => this.logger.error('WS Gateway close error!', e));
+    }
   }
 
   /**
    * UWS Httphandler
-   * 
+   *
    * @private
-   * @param {http.IncomingMessage} req 
-   * @param {http.ServerResponse} res 
+   * @param {http.IncomingMessage} req
+   * @param {http.ServerResponse} res
    * @memberof WSGateway
    */
   private httphandler(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -501,29 +610,31 @@ export class WSGateway {
 
   /**
    * Start heartbeat
-   * 
+   *
    * @public
    * @memberof WSGateway
    */
   @Method
-  public StartHeartbeat() : void {
-    if (!this.heartbeatEnabled)
-      this.heartbeatTimer = new timer();
+  public StartHeartbeat(): void {
+    if (!this.heartbeatEnabled) this.heartbeatTimer = new timer();
 
-    this.heartbeatTimer.setInterval(this.PingClients, [], `${this.settings.heartbeat.interval | 30000}m`); // defaults to 30 seconds
+    this.heartbeatTimer.setInterval(
+      this.PingClients,
+      [],
+      `${this.settings.heartbeat.interval | 30000}m`
+    ); // defaults to 30 seconds
     this.heartbeatEnabled = true;
     this.logger.debug('Heartbeat started');
   }
 
   /**
    * Stop heartbeat
-   * 
+   *
    * @memberof WSGateway
    */
   @Method
-  public StopHeartbeat() : void {
-    if (this.heartbeatEnabled)
-      this.heartbeatTimer.clearInterval();
+  public StopHeartbeat(): void {
+    if (this.heartbeatEnabled) this.heartbeatTimer.clearInterval();
 
     this.heartbeatEnabled = false;
     this.logger.debug('Heartbeat stopped');
@@ -531,83 +642,104 @@ export class WSGateway {
 
   /**
    * Send to a specific client with id
-   * 
-   * @param {string} id 
-   * @param {string} event 
-   * @param {moleculer.GenericObject} data 
+   *
+   * @param {string} id
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
    * @param {boolean} [isExternal] is only applied when its coming from an external node to prevent a race condition which shouldn't exist.
    * @memberof WSGateway
    */
   @Method
-  public send(id: string, event: string, data: moleculer.GenericObject, isExternal?: boolean) : void {
+  public send(
+    id: string,
+    event: string,
+    data: moleculer.GenericObject,
+    isExternal?: boolean
+  ): void {
     const client: Client = this.clients.find(c => c.id === id);
 
     if (!client && !isExternal) {
       const external = this.clients_external.find(c => c.id === id);
 
       if (external) {
-        this.logger.debug(`Sending to a client with id: ${id} on node ${external.nodeID}`);
-        this.broker.emit('ws.client.send', <EventPacket>{
-          event,
-          data
-        }, external.nodeID);
+        this.logger.debug(
+          `Sending to a client with id: ${id} on node ${external.nodeID}`
+        );
+        this.broker.emit(
+          'ws.client.send',
+          <EventPacket>{
+            event,
+            data
+          },
+          external.nodeID
+        );
       } else {
         this.logger.error(`Client ${id} not found`);
       }
     } else {
       this.logger.debug(`Sending to a client with id: ${id}`);
-      client.emit(event, data)
+      client.emit(event, data);
     }
   }
 
   /**
    * Send to all clients on this node
-   * 
-   * @param {string} event 
-   * @param {moleculer.GenericObject} data 
+   *
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
    * @memberof WSGateway
    */
   @Method
-  public emit(event: string, data: moleculer.GenericObject) : void {
+  public emit(event: string, data: moleculer.GenericObject): void {
     this.logger.debug('Sending to all clients on this node');
     this.clients.map(u => u.emit(event, data)); // Map is faster than for loop
   }
 
   /**
    * Send to all clients on all nodes
-   * 
-   * @param {string} event 
-   * @param {moleculer.GenericObject} data 
+   *
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
    * @memberof WSGateway
    */
   @Method
-  public broadcast(event: string, data: moleculer.GenericObject) : void {
+  public broadcast(event: string, data: moleculer.GenericObject): void {
     this.logger.debug('Sending to all clients on all nodes');
-    this.broker.broadcast('ws.client.SendToAll', <EventPacket>{
-      event,
-      data
-    }, 'ws')
-    
+    this.broker.broadcast(
+      'ws.client.SendToAll',
+      <EventPacket>{
+        event,
+        data
+      },
+      'ws'
+    );
+
     this.emit(event, data);
   }
 
   /**
    * Ping clients
-   * 
-   * @returns {void} 
+   *
+   * @returns {void}
    * @memberof WSGateway
    */
   @Method
-  private PingClients() : void {
+  private PingClients(): void {
     this.logger.debug('Pinging clients');
     this.clients = this.clients.filter(u => {
-      if (!u.alive) { // Not alive since last ping
+      if (!u.alive) {
+        // Not alive since last ping
         u.Close(); // Close connection (if there's one)
 
-        this.broker.broadcast('ws.client.disconnected', <external_client>{ // Let other nodes know user disconnected
-          id: u.id,
-          props: u.props
-        }, 'ws');
+        this.broker.broadcast(
+          'ws.client.disconnected',
+          <external_client>{
+            // Let other nodes know user disconnected
+            id: u.id,
+            props: u.props
+          },
+          'ws'
+        );
 
         return false;
       }
@@ -621,12 +753,12 @@ export class WSGateway {
 
   /**
    * Creates a new client
-   * 
-   * @param {uws} socket 
+   *
+   * @param {uws} socket
    * @memberof WSGateway
    */
   @Method
-  private ConnectionHandler(socket: uws) : void {
+  private ConnectionHandler(socket: uws): void {
     const client = new Client(socket, this);
 
     socket.on('close', this.DisconnectHandler.bind(this, client));
@@ -636,55 +768,68 @@ export class WSGateway {
     this.logger.info(`Client: ${client.id} connected`);
 
     // Let other nodes know about this client
-    this.broker.broadcast('ws.client.connected', {
-      id: client.id,
-      props: client.props
-    }, 'ws');
+    this.broker.broadcast(
+      'ws.client.connected',
+      {
+        id: client.id,
+        props: client.props
+      },
+      'ws'
+    );
   }
-
 
   /**
    * Handles client disconnect
-   * 
-   * @param {Client} client 
+   *
+   * @param {Client} client
    * @memberof WSGateway
    */
   @Method
-  private DisconnectHandler(client: Client) : void {
+  private DisconnectHandler(client: Client): void {
     this.clients.splice(this.clients.findIndex(c => c.id === client.id)); // Remove client
 
     this.logger.info(`Client: ${client.id} disconnected`);
 
     // Let other nodes know this client has disconnected
-    this.broker.broadcast('ws.client.disconnected', {
-      id: client.id,
-      props: client.props
-    }, 'ws');
+    this.broker.broadcast(
+      'ws.client.disconnected',
+      {
+        id: client.id,
+        props: client.props
+      },
+      'ws'
+    );
   }
 
   /**
    * Decode incoming packets
-   * 
-   * @param {(Buffer | string | any)} message 
-   * @returns {Bluebird<Packet>} 
+   *
+   * @param {(Buffer | string | any)} message
+   * @returns {Bluebird<Packet>}
    * @memberof WSGateway
    */
   @Method
   public DecodePacket(message: Buffer | string | any): Bluebird<Packet> {
     return new Bluebird.Promise((resolve, reject) => {
       try {
-        if(_.isFunction(this.settings.encryption) && _.isFunction(this.settings.decryption)) {
-            this.settings.decryption(message).then(resolve).catch(err => new DecodeError(err));
+        if (
+          _.isFunction(this.settings.encryption) &&
+          _.isFunction(this.settings.decryption)
+        ) {
+          this.settings
+            .decryption(message)
+            .then(resolve)
+            .catch(err => new DecodeError(err));
         } else {
           switch (this.settings.encryption) {
             case 'JSON':
-                resolve(JSON.parse(message));
-            break;
-  
+              resolve(JSON.parse(message));
+              break;
+
             default:
             case 'Binary':
-              resolve(JSON.parse(Buffer.from(message, 'binary').toString('utf8')));
-            break;
+              resolve(JSON.parse(Buffer.from(message).toString('utf8')));
+              break;
           }
         }
       } catch (e) {
@@ -693,30 +838,33 @@ export class WSGateway {
       }
     });
   }
-  
+
   /**
    * Encodes outgoing packets
-   * 
-   * @param {Packet} packet 
-   * @returns {(Bluebird<Buffer | string>)} 
+   *
+   * @param {Packet} packet
+   * @returns {(Bluebird<Buffer | string>)}
    * @memberof WSGateway
    */
   @Method
   public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
     return new Bluebird.Promise((resolve, reject) => {
       try {
-        if(_.isFunction(this.settings.encryption)) {
-          this.settings.encryption(packet).then(resolve).catch(err => new EncodeError(err));
+        if (_.isFunction(this.settings.encryption)) {
+          this.settings
+            .encryption(packet)
+            .then(resolve)
+            .catch(err => new EncodeError(err));
         } else {
           switch (this.settings.encryption) {
             case 'JSON':
-                resolve(JSON.stringify(packet));
-            break;
-  
+              resolve(JSON.stringify(packet));
+              break;
+
             default:
             case 'Binary':
-                resolve(new Buffer(JSON.stringify(packet)));
-            break;
+              resolve(new Buffer(JSON.stringify(packet)));
+              break;
           }
         }
       } catch (e) {
@@ -734,249 +882,302 @@ export class WSGateway {
   /**
    * Check whitelist
    * Credits: Icebob
-   * 
+   *
    * @private
-   * @param {route} route 
-   * @param {string} action 
-   * @returns {boolean} 
+   * @param {route} route
+   * @param {string} action
+   * @returns {boolean}
    * @memberof WSGateway
    */
   @Method
-  private checkWhitelist(route: route, action: string) : boolean {
-    return route.whitelist.find((mask: string | RegExp) => {
-      if (_.isString(mask)) {
-        return nanomatch.isMatch(action, mask, { unixify: false });
-      } else if (_.isRegExp(mask)) {
-        return mask.test(action);
-      }
-    }) != null;
+  private checkWhitelist(route: route, action: string): boolean {
+    return (
+      route.whitelist.find((mask: string | RegExp) => {
+        if (_.isString(mask)) {
+          return nanomatch.isMatch(action, mask, { unixify: false });
+        } else if (_.isRegExp(mask)) {
+          return mask.test(action);
+        }
+      }) != null
+    );
   }
 
   /**
    * Here we check if authorization method exists on the route and set the default mappingPolicy
-   * 
+   *
    * @private
-   * @param {route} route 
-   * @returns {route} 
+   * @param {route} route
+   * @returns {route}
    * @memberof WSGateway
    */
   @Method
-  private ProcessRoute(route: route) : route {
+  private ProcessRoute(route: route): route {
     // Check if we have a valid authorization method.
     if (route.authorization) {
       if (!_.isFunction(this.authorization)) {
-        this.logger.warn('No authorization method, please define one to use authorization. Route will now be unprotected.');
+        this.logger.warn(
+          'No authorization method, please define one to use authorization. Route will now be unprotected.'
+        );
         route.authorization = false;
       }
     }
 
-    if (!route.mappingPolicy)
-      route.mappingPolicy = 'all';
+    if (!route.mappingPolicy) route.mappingPolicy = 'all';
 
     return route;
   }
 
   /**
    * Find route by name & action
-   * 
+   *
    * @private
-   * @param {string} name 
-   * @param {string} action 
-   * @returns {Bluebird<{ route: route, action: string }>} 
+   * @param {string} name
+   * @param {string} action
+   * @returns {Bluebird<{ route: route, action: string }>}
    * @memberof WSGateway
    */
   @Method
-  private FindRoute(name: string, action: string) : Bluebird<{ route: route, action: string }> {
+  private FindRoute(
+    name: string,
+    action: string
+  ): Bluebird<{ route: route; action: string }> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.settings.routes && this.settings.routes.length > 0) {
         for (let route of this.settings.routes) {
           if (route.name !== name) {
             continue; // continue on with next cycle.
           }
-  
+
           // resolve alias
           if (route.aliases && _.keys(route.aliases).length > 0) {
-            for (let alias in route.aliases) { 
+            for (let alias in route.aliases) {
               if (alias.match(action)) {
                 action = route.aliases[alias]; // apply correct action
               }
             }
           }
-  
+
           // if whitelist exists, check if the name is there.
-          if (route.whitelist && route.whitelist.length > 0 && route.mappingPolicy == 'strict') {
-            if (!this.checkWhitelist(route, action))
-              continue;
+          if (
+            route.whitelist &&
+            route.whitelist.length > 0 &&
+            route.mappingPolicy == 'strict'
+          ) {
+            if (!this.checkWhitelist(route, action)) continue;
           }
-  
+
           return resolve({ route, action }); // must resolve action as it could be an alias.
         }
-  
+
         return reject(new RouteNotFound());
       }
     });
   }
 
-
   /**
    * Call an action on the first available node
    * @Note: No native promises & async/await as it hurts performance, if you need another performance kick, consider converting all promises to callbacks.
-   * 
-   * @param {Client} sender 
-   * @param {string} name 
-   * @param {string} _action 
-   * @param {moleculer.ActionParams} params 
-   * @returns {Bluebird<any>} 
+   *
+   * @param {Client} sender
+   * @param {string} name
+   * @param {string} _action
+   * @param {moleculer.ActionParams} params
+   * @returns {Bluebird<any>}
    * @memberof WSGateway
    */
   @Method
-  public CallAction(sender: Client, name: string, _action: string, params: moleculer.ActionParams) : Bluebird<any> {
+  public CallAction(
+    sender: Client,
+    name: string,
+    _action: string,
+    params: moleculer.ActionParams
+  ): Bluebird<any> {
     return new Bluebird.Promise((resolve, reject) => {
-      this.FindRoute(name, _action).then(({ route, action }) => {
-
-        // Sender needs to authorize
-        if (route.authorization && !sender.authorized) {
-          reject(new NotAuthorized());
-        }
-
-        this.logger.debug(`Finding endpoint for: ${action}`);
-        const endpoint: any = this.broker.findNextActionEndpoint(action);
-
-        if (endpoint instanceof moleculer.Errors.ServiceNotFoundError) {
-          return reject(new EndpointNotAvailable());
-        }
-
-        // Credits Icebob
-        // Action is not publishable
-        if (endpoint.action && endpoint.action.publish === false) {
-          return reject(new RouteNotFound());
-        }
-
-        let ctx: moleculer.Context = moleculer.Context.create(this.broker, { name: this.name, handler: _.noop}, this.broker.nodeID, params, {});
-        (ctx as any)._metricStart(ctx.metrics);
-
-        if (route.onBeforeCall) {
-          // In beforecall you can modify the params, the context and client props.
-          Bluebird.Promise.resolve(route.onBeforeCall.call(this, ctx, <Request>{
-              action,
-              sender: {
-                id: sender.id,
-                props: sender.props
-              },
-              params
-          })).then(result => {
-            if (result) { // Override anything if the beforeCall returns them.
-              if (result.ctx) // Apply context
-                ctx = result.ctx;
-  
-              if (result.params) // Apply params
-                params = result.params
-
-              if (result.props) // Apply props
-                this.clients.find(c => c.id === sender.id).props = _.extend({}, sender.props, result.props);
-            }
-          }).catch(reject);
-        }
-
-        return ctx.call(endpoint, params).then((res) => {
-          // In aftercall you can modify the result.
-          if (route.onAfterCall) {
-            Bluebird.Promise.resolve(route.onAfterCall.call(this, ctx, <Request>{
-              action,
-              sender: {
-                id: sender.id,
-                props: sender.props
-              },
-              params
-            }, res)).then((result) => {
-              if (result) // Apply result
-                res = result;
-            }).catch(reject);
+      this.FindRoute(name, _action)
+        .then(({ route, action }) => {
+          // Sender needs to authorize
+          if (route.authorization && !sender.authorized) {
+            reject(new NotAuthorized());
           }
 
-          (ctx as any)._metricFinish(null, ctx.metrics);
-          resolve(res);
-        }).catch(reject);
-      }).catch(err => {
-        if (!err)
-          return;
+          this.logger.debug(`Finding endpoint for: ${action}`);
+          const endpoint: any = this.broker.findNextActionEndpoint(action);
 
-        if (err.ctx) {
-          err.ctx._metricFinish(null, err.ctx.metrics);
-        }
+          if (endpoint instanceof moleculer.Errors.ServiceNotFoundError) {
+            return reject(new EndpointNotAvailable());
+          }
 
-        return reject(err);
-      });
+          // Credits Icebob
+          // Action is not publishable
+          if (endpoint.action && endpoint.action.publish === false) {
+            return reject(new RouteNotFound());
+          }
+
+          let ctx: moleculer.Context = moleculer.Context.create(
+            this.broker,
+            { name: this.name, handler: _.noop },
+            this.broker.nodeID,
+            params,
+            {}
+          );
+          (ctx as any)._metricStart(ctx.metrics);
+
+          if (route.onBeforeCall) {
+            // In beforecall you can modify the params, the context and client props.
+            Bluebird.Promise.resolve(
+              route.onBeforeCall.call(this, ctx, <Request>{
+                action,
+                sender: {
+                  id: sender.id,
+                  props: sender.props
+                },
+                params
+              })
+            )
+              .then(result => {
+                if (result) {
+                  // Override anything if the beforeCall returns them.
+                  if (result.ctx)
+                    // Apply context
+                    ctx = result.ctx;
+
+                  if (result.params)
+                    // Apply params
+                    params = result.params;
+
+                  if (result.props)
+                    // Apply props
+                    this.clients.find(c => c.id === sender.id).props = _.extend(
+                      {},
+                      sender.props,
+                      result.props
+                    );
+                }
+              })
+              .catch(reject);
+          }
+
+          return ctx
+            .call(endpoint, params)
+            .then(res => {
+              // In aftercall you can modify the result.
+              if (route.onAfterCall) {
+                Bluebird.Promise.resolve(
+                  route.onAfterCall.call(
+                    this,
+                    ctx,
+                    <Request>{
+                      action,
+                      sender: {
+                        id: sender.id,
+                        props: sender.props
+                      },
+                      params
+                    },
+                    res
+                  )
+                )
+                  .then(result => {
+                    if (result)
+                      // Apply result
+                      res = result;
+                  })
+                  .catch(reject);
+              }
+
+              (ctx as any)._metricFinish(null, ctx.metrics);
+              resolve(res);
+            })
+            .catch(reject);
+        })
+        .catch(err => {
+          if (!err) return;
+
+          if (err.ctx) {
+            err.ctx._metricFinish(null, err.ctx.metrics);
+          }
+
+          return reject(err);
+        });
     });
   }
 
-
   /**
    * Client connected on another node
-   * 
-   * @param {external_client_payload} payload 
-   * @param {any} sender 
+   *
+   * @param {external_client_payload} payload
+   * @param {any} sender
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
   private 'ws.client.connected'(payload: external_client_payload, sender) {
-    if (sender === this.broker.nodeID) { return; }
+    if (sender === this.broker.nodeID) {
+      return;
+    }
 
     this.logger.debug(`Client: ${payload.id} connected on node: ${sender}`);
 
-    const opts = { nodeID: sender, ...payload }
+    const opts = { nodeID: sender, ...payload };
     this.clients_external.push(opts);
 
     this.Emitter.emit('connected_external', opts);
   }
 
-
   /**
    * Client disconnected on another node
-   * 
-   * @param {external_client_payload} payload 
-   * @param {any} sender 
+   *
+   * @param {external_client_payload} payload
+   * @param {any} sender
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
   private 'ws.client.disconnected'(payload: external_client_payload, sender) {
-    if (sender === this.broker.nodeID) { return; }
+    if (sender === this.broker.nodeID) {
+      return;
+    }
     this.logger.debug(`Client: ${payload.id} disconnected on node: ${sender}`);
 
-    const opts = { nodeID: sender, ...payload }
-    this.clients_external.splice(this.clients_external.findIndex(c => c.nodeID === sender && c.id === payload.id), 1);
+    const opts = { nodeID: sender, ...payload };
+    this.clients_external.splice(
+      this.clients_external.findIndex(
+        c => c.nodeID === sender && c.id === payload.id
+      ),
+      1
+    );
 
     this.Emitter.emit('disconnected_external', opts);
   }
 
   /**
    * Let other nodes send to all clients on this server
-   * 
+   *
    * @public
-   * @param {Packet} payload 
-   * @returns 
+   * @param {Packet} payload
+   * @returns
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
   private 'ws.client.SendToAll'(payload: EventPacket, sender) {
-    if (sender === this.broker.nodeID) { return; }
+    if (sender === this.broker.nodeID) {
+      return;
+    }
     this.logger.debug(`${sender} requested send to all`);
     return this.emit(payload.event, payload.data);
   }
 
   /**
    * Let other nodes send to a client on this server
-   * 
+   *
    * @private
-   * @param {external_client_send} payload 
-   * @param {any} sender 
-   * @returns 
+   * @param {external_client_send} payload
+   * @param {any} sender
+   * @returns
    * @memberof WSGateway
    */
   @Event({
@@ -984,7 +1185,7 @@ export class WSGateway {
   })
   private 'ws.client.send'(payload: external_client_send, sender) {
     const id = payload.id,
-          packet: EventPacket = payload.packet;
+      packet: EventPacket = payload.packet;
 
     this.logger.debug(`Sending to ${id} from node: ${sender}`);
 
@@ -993,32 +1194,37 @@ export class WSGateway {
 
   /**
    * Sync props
-   * 
+   *
    * @private
-   * @param {external_client_payload} payload 
-   * @param {any} sender 
-   * @returns 
+   * @param {external_client_payload} payload
+   * @param {any} sender
+   * @returns
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
   private 'ws.client.update'(payload: external_client_payload, sender) {
-    if (sender === this.broker.nodeID) { return; }
+    if (sender === this.broker.nodeID) {
+      return;
+    }
     this.logger.debug(`Client ${payload.id} updated props`);
     this.clients_external.find(c => c.id === payload.id).props = payload.props;
   }
 
   /**
    * Remove clients connected to the disconnected node
-   * 
-   * @param {any} payload 
-   * @param {any} sender 
+   *
+   * @param {any} payload
+   * @param {any} sender
    * @memberof WSGateway
    */
   @Event()
-  private '$node.disconnected'(payload, sender) { // Remove clients connected to the disconnected node
+  private '$node.disconnected'(payload, sender) {
+    // Remove clients connected to the disconnected node
     this.logger.debug(`Node: ${sender} disconnected`);
-    this.clients_external = this.clients_external.filter(c => c.nodeID !== sender)
+    this.clients_external = this.clients_external.filter(
+      c => c.nodeID !== sender
+    );
   }
 }
