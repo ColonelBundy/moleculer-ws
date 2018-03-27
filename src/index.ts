@@ -29,7 +29,8 @@ import {
   EncodeError,
   DecodeError,
   EndpointNotAvailable,
-  ServiceNotAvailable
+  ServiceNotAvailable,
+  StraightError
 } from './errors';
 
 interface Flags {
@@ -178,6 +179,7 @@ class Client {
         set: (obj, prop, value) => {
           obj[prop] = value;
 
+          // Send update to all nodes
           this.server.broker.broadcast(
             'ws.client.update',
             {
@@ -307,8 +309,15 @@ class Client {
                 return this.server
                   .CallAction(this, endpoint[0], endpoint[1], data)
                   .then(resp => {
+                    if (resp['client']) {
+                      this.props = resp['client']['props']; // If props were modified
+                    }
+
                     this.authorized = true;
                     return Bluebird.resolve(resp);
+                  })
+                  .catch(e => {
+                    return Bluebird.Promise.reject(new StraightError(e));
                   });
               }
 
@@ -320,11 +329,11 @@ class Client {
                   return Bluebird.resolve(resp);
                 })
                 .catch(e => {
-                  return Bluebird.reject(new ClientError(e));
+                  return Bluebird.Promise.reject(new StraightError(e));
                 });
             } else {
               return Bluebird.Promise.reject(
-                new ClientError('Already authenticated')
+                new StraightError('Already authenticated')
               );
             }
           } else {
@@ -350,13 +359,14 @@ class Client {
             this,
             this.ResponseCallback(data, _ack)
           ); // Add a callback function so we can allow a response
+          _ack = -1; // Need to reset here so we don't send multiple responses
           return Bluebird.Promise.resolve();
         } else {
-          return Bluebird.Promise.reject(new ClientError('Malformed packet')); // Should never reach here unless type is undefined
+          return Bluebird.Promise.reject(new StraightError('Malformed packet')); // Should never reach here unless type is undefined
         }
       })
       .then(response => {
-        if (_ack > -1 && response) {
+        if (_ack > -1) {
           return this.SendResponse(response, _ack);
         }
       })
@@ -372,8 +382,8 @@ class Client {
           error = new ClientError('Malformed packet');
         } else if (e instanceof EncodeError) {
           error = new ClientError('Internal Server Error');
-        } else if (e instanceof ClientError) {
-          error = e;
+        } else if (e instanceof StraightError) {
+          error = new ClientError(e.message);
         }
 
         return this.SendResponse(error, _ack);
@@ -393,7 +403,7 @@ class Client {
    * @memberof Client
    */
   private SendResponse(
-    data: moleculer.GenericObject,
+    data: moleculer.GenericObject = {},
     ack: number
   ): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
@@ -1003,6 +1013,8 @@ export class WSGateway {
     params: moleculer.ActionParams
   ): Bluebird<any> {
     return new Bluebird.Promise((resolve, reject) => {
+      let ctx: moleculer.Context;
+
       this.FindRoute(name, _action)
         .then(({ route, action }) => {
           // Sender needs to authorize
@@ -1023,7 +1035,7 @@ export class WSGateway {
             return reject(new RouteNotFound());
           }
 
-          let ctx: moleculer.Context = moleculer.Context.create(
+          ctx = moleculer.Context.create(
             this.broker,
             { name: this.name, handler: _.noop },
             this.broker.nodeID,
@@ -1103,8 +1115,8 @@ export class WSGateway {
         .catch(err => {
           if (!err) return;
 
-          if (err.ctx) {
-            err.ctx._metricFinish(null, err.ctx.metrics);
+          if (ctx) {
+            (ctx as any)._metricFinish(null, ctx.metrics);
           }
 
           return reject(err);
