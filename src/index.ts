@@ -121,6 +121,7 @@ export interface aliases {
 }
 
 export interface Request {
+  name: string;
   action: string;
   sender: {
     id: string;
@@ -151,7 +152,7 @@ export interface route {
 type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 
-class Client {
+export class Client {
   private readonly server: WSGateway;
   private logger: moleculer.LoggerInstance;
   public readonly id: string = shortid.generate();
@@ -1048,6 +1049,7 @@ export class WSGateway {
             // In beforecall you can modify the params, the context and client props.
             Bluebird.Promise.resolve(
               route.onBeforeCall.call(this, ctx, <Request>{
+                name,
                 action,
                 sender: {
                   id: sender.id,
@@ -1087,6 +1089,7 @@ export class WSGateway {
                     this,
                     ctx,
                     <Request>{
+                      name,
                       action,
                       sender: {
                         id: sender.id,
