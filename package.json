@@ -10,7 +10,8 @@
     "testing": "yarn clean && tsc && node dist/src/testing/index.js",
     "runner": "yarn clean && tsc && moleculer-runner --repl --config dist/src/testing/moleculer.dev.config.js dist/src/testing/services",
     "debug": "yarn clean && tsc && node --inspect dist/src/index.js",
-    "test": "mocha -r ts-node/register test/**/*.spec.ts"
+    "test": "mocha -r ts-node/register test/**/*.spec.ts",
+    "release": "yarn clean && tsc && yarn test && typedoc ./docs ./src"
   },
   "engines": {
     "node": ">=8.9.1"
@@ -45,6 +46,7 @@
     "nodemon": "^1.11.0",
     "rimraf": "^2.6.1",
     "ts-node": "^5.0.1",
+    "typedoc": "^0.11.1",
     "typescript": "^2.7.1",
     "ws": "^5.0.0"
   }

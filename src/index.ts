@@ -309,8 +309,8 @@ class Client {
                 return this.server
                   .CallAction(this, endpoint[0], endpoint[1], data)
                   .then(resp => {
-                    if (resp['client']) {
-                      this.props = resp['client']['props']; // If props were modified
+                    if (resp['props']) {
+                      this.props = resp['props']; // If props were modified
                     }
 
                     this.authorized = true;
@@ -1059,16 +1059,14 @@ export class WSGateway {
               .then(result => {
                 if (result) {
                   // Override anything if the beforeCall returns them.
-                  if (result.ctx)
-                    // Apply context
-                    ctx = result.ctx;
+                  // Apply context
+                  if (result.ctx) ctx = result.ctx;
 
-                  if (result.params)
-                    // Apply params
-                    params = result.params;
+                  // Apply params
+                  if (result.params) params = result.params;
 
+                  // Apply props
                   if (result.props)
-                    // Apply props
                     this.clients.find(c => c.id === sender.id).props = _.extend(
                       {},
                       sender.props,
@@ -1100,9 +1098,8 @@ export class WSGateway {
                   )
                 )
                   .then(result => {
-                    if (result)
-                      // Apply result
-                      res = result;
+                    // Apply result
+                    if (result) res = result;
                   })
                   .catch(reject);
               }

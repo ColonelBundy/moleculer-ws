@@ -1,6 +1,12 @@
 import moleculer = require('moleculer');
 import { Service, Action, Method } from 'moleculer-decorators';
-import { WSGateway, Settings, route, Request, BaseClass } from '../../src/index';
+import {
+  WSGateway,
+  Settings,
+  route,
+  Request,
+  BaseClass
+} from '../../src/index';
 import Bluebird = require('bluebird');
 
 @Service({
@@ -12,18 +18,17 @@ import Bluebird = require('bluebird');
   }
 })
 class Gateway extends BaseClass {
-
   created() {
-    this.on('test.respond', (data, client, respond) => {
+    this.on('callEvent', (data, client, respond) => {
       respond(null, data);
     });
 
-    this.on('test.respond.emit', (data, client) => {
-      this.emit('test.respond.emit', data);
+    this.on('emit', (data, client) => {
+      this.emit('emit', data);
     });
 
-    this.on('test.respond.send', (data, client) => {
-      this.send(client.id, 'test.respond.emit', data);
+    this.on('send', (data, client) => {
+      this.send(client.id, 'send', data);
     });
   }
 
@@ -31,6 +36,9 @@ class Gateway extends BaseClass {
   EchoParams(ctx) {
     return Bluebird.resolve(ctx.params);
   }
+
+  @Method
+  authorize(ctx) {}
 }
 
 module.exports = Gateway;
