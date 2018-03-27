@@ -70,10 +70,6 @@ interface ResponsePacket {
 export interface Settings {
   port: number;
   ip?: string;
-  externalAuth?: {
-    enabled: boolean;
-    endpoint: string; // eg: 'users.auth' where 'users' is the service and 'auth' the action
-  };
   heartbeat?: {
     enabled: boolean;
     interval?: number;
@@ -297,31 +293,6 @@ class Client {
           if (name === 'internal' && action === 'auth') {
             this.logger.debug('Auth action');
             if (!this.authorized) {
-              if (
-                this.server.settings.externalAuth &&
-                this.server.settings.externalAuth.enabled
-              ) {
-                this.logger.debug('External auth action');
-
-                const endpoint = this.server.settings.externalAuth.endpoint.split(
-                  '.'
-                );
-
-                return this.server
-                  .CallAction(this, endpoint[0], endpoint[1], data)
-                  .then(resp => {
-                    if (resp['props']) {
-                      this.props = resp['props']; // If props were modified
-                    }
-
-                    this.authorized = true;
-                    return Bluebird.resolve(resp);
-                  })
-                  .catch(e => {
-                    return Bluebird.Promise.reject(new StraightError(e));
-                  });
-              }
-
               this.logger.debug('Internal auth action');
               return Bluebird.Promise.method(this.server.authorize)
                 .call(this, this, data)
@@ -558,14 +529,6 @@ export class WSGateway {
       this.settings.routes = this.settings.routes.map(route =>
         this.ProcessRoute(route)
       );
-    }
-
-    // Pre check
-    if (this.settings.externalAuth && this.settings.externalAuth.enabled) {
-      const endpoint = this.settings.externalAuth.endpoint.split('.');
-      if (endpoint.length !== 1 || !endpoint[0] || !endpoint[1]) {
-        this.logger.fatal('Externalauth endpoint is invalid!');
-      }
     }
 
     shortid.worker(
