@@ -19,16 +19,16 @@ import Bluebird = require('bluebird');
 })
 class Gateway extends BaseClass {
   created() {
-    this.on('callEvent', (data, client, respond) => {
+    this.on('callEvent', (data, client_id, respond) => {
       respond(null, data);
     });
 
-    this.on('emit', (data, client) => {
+    this.on('emit', (data, client_id) => {
       this.emit('emit', data);
     });
 
-    this.on('send', (data, client) => {
-      this.send(client.id, 'send', data);
+    this.on('send', (data, client_id) => {
+      this.send(client_id, 'send', data);
     });
   }
 
@@ -36,9 +36,6 @@ class Gateway extends BaseClass {
   EchoParams(ctx) {
     return Bluebird.resolve(ctx.params);
   }
-
-  @Method
-  authorize(ctx) {}
 }
 
 module.exports = Gateway;

@@ -152,7 +152,7 @@ export interface route {
 type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 
-export class Client {
+class Client {
   private readonly server: WSGateway;
   private logger: moleculer.LoggerInstance;
   public readonly id: string = shortid.generate();
@@ -346,18 +346,17 @@ export class Client {
 
           // Server listener
           /* Works as: 
-              this.on('action_name', (data, client, respond) => {
+              this.on('action_name', (data, client_id, respond) => {
                 respond(error, data_to_respond_with) // to respond to this particular request.
-                client.emit(....) // to send anything else to the client.
                 this.emit(...) // to send to everyone on this node
                 this.broadcast(...) // to send to everyone on all nodes
-                this.send(id, ...) // to send to a client with id (id exists in client.id) (will still send to the client if he's on another node)
+                this.send(client_id, ...) // to send to a client with client_id (will still send to the client if he's on another node)
               });
             */
           this.server.Emitter.emit(
             event,
             data,
-            this,
+            this.id,
             this.ResponseCallback(data, _ack)
           ); // Add a callback function so we can allow a response
           _ack = -1; // Need to reset here so we don't send multiple responses
@@ -432,7 +431,7 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client: Client,
+      client_id: string,
       respond: (error: string, data?: any) => void
     ) => void
   ) => void;
@@ -440,7 +439,7 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client: Client,
+      client_id: string,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -449,7 +448,7 @@ export class BaseClass extends BaseSchema {
     timesTolisten: number,
     callback: (
       data: any,
-      client: Client,
+      client_id: string,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -549,8 +548,8 @@ export class WSGateway {
 
     this.server = new uws.Server({
       server: this.webServer,
-      path: this.settings.path,
-      host: this.settings.ip,
+      path: this.settings.path || '/',
+      host: this.settings.ip || '0.0.0.0',
       port: this.settings.port,
       perMessageDeflate: this.settings.perMessageDeflate
     });
