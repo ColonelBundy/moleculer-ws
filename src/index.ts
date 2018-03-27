@@ -460,7 +460,6 @@ export class WSGateway {
   public Emitter: EventEmitter2;
   public on: EventEmitter2['on'];
   public once: EventEmitter2['once'];
-  public onAny: EventEmitter2['onAny'];
   public many: EventEmitter2['many'];
   public addListener: EventEmitter2['addListener'];
   public removeListener: EventEmitter2['removeListener'];
@@ -493,7 +492,6 @@ export class WSGateway {
     );
     this.on = this.Emitter.on.bind(this.Emitter);
     this.once = this.Emitter.on.bind(this.Emitter);
-    this.onAny = this.Emitter.onAny.bind(this.Emitter);
     this.many = this.Emitter.many.bind(this.Emitter);
     this.addListener = this.Emitter.addListener.bind(this.Emitter);
     this.removeListener = this.Emitter.removeListener.bind(this.Emitter);
