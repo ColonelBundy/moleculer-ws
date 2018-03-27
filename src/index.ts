@@ -596,7 +596,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public StartHeartbeat(): void {
+  private StartHeartbeat(): void {
     if (!this.heartbeatEnabled) this.heartbeatTimer = new timer();
 
     this.heartbeatTimer.setInterval(
@@ -614,7 +614,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Method
-  public StopHeartbeat(): void {
+  private StopHeartbeat(): void {
     if (this.heartbeatEnabled) this.heartbeatTimer.clearInterval();
 
     this.heartbeatEnabled = false;
