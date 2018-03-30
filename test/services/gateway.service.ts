@@ -42,6 +42,16 @@ class Gateway extends BaseClass {
     this.send(ctx.meta.client.id, 'EmitAction', ctx.params);
     return Bluebird.resolve();
   }
+
+  @Method
+  authorize(client, params) {
+    if (params.username == 'test' && params.password == 'test') {
+      client.props.username = 'test'; // set client prop
+      return Bluebird.Promise.resolve();
+    }
+
+    return Bluebird.Promise.reject('Invalid login');
+  }
 }
 
 module.exports = Gateway;

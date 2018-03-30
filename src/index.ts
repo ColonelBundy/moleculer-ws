@@ -33,6 +33,8 @@ import {
   StraightError
 } from './errors';
 
+export * from './errors';
+
 interface Flags {
   binary: boolean;
   masked: boolean;
@@ -357,7 +359,9 @@ export class Client {
           error = new ClientError(e.message);
         }
 
-        return this.SendResponse(error, _ack);
+        if (_ack > -1) {
+          return this.SendResponse(error, _ack);
+        }
       })
       .catch(e => {
         this.logger.error('Failed to send response', e);
@@ -580,6 +584,7 @@ export class WSGateway {
         Bluebird.promisify(this.webServer.close)
       ])
         .then(() => {
+          if (this.heartbeatEnabled) this.heartbeatTimer.clearInterval();
           this.logger.info('WS Gateway stopped!');
         })
         .catch(e => this.logger.error('WS Gateway close error!', e));
