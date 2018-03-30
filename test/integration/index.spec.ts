@@ -1,27 +1,65 @@
 import { expect, assert, should } from 'chai';
-import { Packet, PacketType } from '../../src/index';
+import { Packet, PacketType, WSGateway } from '../../src/index';
 import path = require('path');
 import Gateway = require('../services/gateway.service');
 import { ServiceBroker, Context, Service } from 'moleculer';
 import ws = require('ws');
-
-function Setup() {
-  const broker = new ServiceBroker /**{logger: console, logLevel: 'debug'} **/();
-  const service = broker.createService(<any>Gateway);
-
-  return [broker, service];
-}
+import { Client } from 'moleculer-ws-client';
 
 describe('Gateway', function() {
-  let broker, service, server: ws;
+  this.timeout(10000);
+  let broker: ServiceBroker, service: Service, client: Client;
+  const payload = { foo: 'bar' };
 
-  before(() => {
-    [broker, service] = Setup();
+  before(function(done) {
+    broker = new ServiceBroker(); //{ logger: console, logLevel: 'debug' }
+    service = broker.createService(<any>Gateway);
+
+    broker.start();
+    client = new Client('localhost:3000');
+    client.on('connected', () => {
+      done();
+    });
+  });
+
+  after(function(done) {
+    broker.stop();
+    done();
   });
 
   describe('Actions', function() {
-    beforeEach(() => {
-      server = new ws('ws://localhost:3000');
+    it('Can call action', function(done) {
+      client
+        .call('test', 'Gateway.EchoParams', payload)
+        .then(data => {
+          done();
+        })
+        .catch(e => done(e));
+    });
+
+    it('Can emit action', function(done) {
+      client.emit('test', 'Gateway.EmitAction', payload);
+      client.on('EmitAction', data => {
+        done();
+      });
+    });
+  });
+
+  describe('Events', function() {
+    it('Can call event', function(done) {
+      client
+        .callEvent('CallEvent', payload)
+        .then(data => {
+          done();
+        })
+        .catch(e => done(e));
+    });
+
+    it('Can emit event', function(done) {
+      client.emitEvent('EmitEvent', payload);
+      client.on('EmitEvent', data => {
+        done();
+      });
     });
   });
 });

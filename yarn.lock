@@ -1722,6 +1722,14 @@ moleculer-repl@^0.4.0:
     tiny-human-time "1.2.0"
     vorpal "1.12.0"
 
+moleculer-ws-client@colonelbundy/moleculer-ws-client:
+  version "1.0.0"
+  resolved "https://codeload.github.com/colonelbundy/moleculer-ws-client/tar.gz/8f0ba85b1477f5dba7f3eaa638d801b36f3e1d5f"
+  dependencies:
+    eventemitter2 "^5.0.1"
+    typescript "^2.7.1"
+    ws "^5.0.0"
+
 moleculer@^0.12.1, moleculer@moleculerjs/moleculer:
   version "0.12.1"
   resolved "https://codeload.github.com/moleculerjs/moleculer/tar.gz/62226510cbaa65c0ef87668857ce13fc34ce8b48"

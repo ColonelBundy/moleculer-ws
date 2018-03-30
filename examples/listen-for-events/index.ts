@@ -13,7 +13,7 @@ import Bluebird = require('bluebird');
 })
 class Gateway extends BaseClass {
   created() {
-    this.on('someEvent', (data, client_id, respond) => {
+    this.on('someEvent', (data, client, respond) => {
       // to respond to this particular request (if client wants a response)
       respond('Any error here', {
         data: 'any data here to respond with'
@@ -21,7 +21,7 @@ class Gateway extends BaseClass {
 
       this.emit('event', { data: 'some data' }); // to send to everyone on this node
       this.broadcast('event', { data: 'some data' }); // to send to everyone on all nodes
-      this.send(client_id, 'event', { data: 'some data' }); // to send to a client with client_id (will still send to the client if he's on another node)
+      this.send(client.id, 'event', { data: 'some data' }); // to send to a client with client id (will still send to the client if he's on another node)
     });
   }
 }

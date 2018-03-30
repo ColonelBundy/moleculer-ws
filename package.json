@@ -5,7 +5,7 @@
   "main": "dist/src/index.js",
   "scripts": {
     "clean": "rimraf dist/*",
-    "compile": "yarn clean && tsc && node src/dist/index.js",
+    "compile": "yarn clean && tsc",
     "dev": "nodemon -e ts --exec \"yarn compile\"",
     "testing": "yarn clean && tsc && node dist/src/testing/index.js",
     "runner": "yarn clean && tsc && moleculer-runner --repl --config dist/src/testing/moleculer.dev.config.js dist/src/testing/services",
@@ -43,6 +43,7 @@
     "ioredis": "^3.2.2",
     "mocha": "^5.0.4",
     "moleculer-repl": "^0.4.0",
+    "moleculer-ws-client": "colonelbundy/moleculer-ws-client",
     "nodemon": "^1.11.0",
     "rimraf": "^2.6.1",
     "ts-node": "^5.0.1",

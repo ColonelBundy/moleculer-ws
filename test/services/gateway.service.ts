@@ -12,29 +12,35 @@ import Bluebird = require('bluebird');
 @Service({
   mixins: [WSGateway],
   settings: {
-    encryption: 'JSON',
+    port: 3000,
     path: '/',
-    routes: []
+    routes: [
+      <route>{
+        name: 'test'
+      }
+    ]
   }
 })
 class Gateway extends BaseClass {
   created() {
-    this.on('callEvent', (data, client_id, respond) => {
+    this.on('CallEvent', (data, client, respond) => {
       respond(null, data);
     });
 
-    this.on('emit', (data, client_id) => {
-      this.emit('emit', data);
-    });
-
-    this.on('send', (data, client_id) => {
-      this.send(client_id, 'send', data);
+    this.on('EmitEvent', (data, client, respond) => {
+      this.send(client.id, 'EmitEvent', data);
     });
   }
 
   @Action()
   EchoParams(ctx) {
     return Bluebird.resolve(ctx.params);
+  }
+
+  @Action()
+  EmitAction(ctx) {
+    this.send(ctx.meta.client.id, 'EmitAction', ctx.params);
+    return Bluebird.resolve();
   }
 }
 

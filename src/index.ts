@@ -62,7 +62,7 @@ export interface EventPacket {
   data: any;
 }
 
-interface ResponsePacket {
+export interface ResponsePacket {
   id: number;
   data: any;
 }
@@ -89,12 +89,12 @@ export interface Settings {
   };
 }
 
-interface external_client_payload {
+export interface external_client_payload {
   id: string;
   props: moleculer.GenericObject;
 }
 
-interface external_client_send {
+export interface external_client_send {
   id: string;
   packet: EventPacket;
 }
@@ -102,7 +102,7 @@ interface external_client_send {
 // @TODO
 // * Convert to class
 // * add functions that when called gets executed on node where the client lives, eg: .emit/.call
-interface external_client extends external_client_payload {
+export interface external_client extends external_client_payload {
   nodeID: string;
 }
 
@@ -119,10 +119,6 @@ export interface aliases {
 export interface Request {
   name: string;
   action: string;
-  sender: {
-    id: string;
-    props: moleculer.GenericObject;
-  };
   params: moleculer.ActionParams;
 }
 
@@ -145,10 +141,10 @@ export interface route {
   onError?(req, res, err): void;
 }
 
-type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
-type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
+export type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
+export type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 
-class Client {
+export class Client {
   private readonly server: WSGateway;
   private logger: moleculer.LoggerInstance;
   public readonly id: string = shortid.generate();
@@ -327,7 +323,11 @@ class Client {
           this.server.Emitter.emit(
             event,
             data,
-            this.id,
+            {
+              id: this.id,
+              props: this.props,
+              authorized: this.authorized
+            },
             this.ResponseCallback(data, _ack)
           ); // Add a callback function so we can allow a response
           _ack = -1; // Need to reset here so we don't send multiple responses
@@ -402,7 +402,11 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client_id: string,
+      client: {
+        id: string;
+        props: moleculer.GenericObject;
+        authorized: boolean;
+      },
       respond: (error: string, data?: any) => void
     ) => void
   ) => void;
@@ -410,7 +414,11 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client_id: string,
+      client: {
+        id: string;
+        props: moleculer.GenericObject;
+        authorized: boolean;
+      },
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -419,7 +427,11 @@ export class BaseClass extends BaseSchema {
     timesTolisten: number,
     callback: (
       data: any,
-      client_id: string,
+      client: {
+        id: string;
+        props: moleculer.GenericObject;
+        authorized: boolean;
+      },
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -959,7 +971,7 @@ export class WSGateway {
    * Call an action on the first available node
    * @Note: No native promises & async/await as it hurts performance, if you need another performance kick, consider converting all promises to callbacks.
    *
-   * @param {Client} sender
+   * @param {Client} client
    * @param {string} name
    * @param {string} _action
    * @param {moleculer.ActionParams} params
@@ -968,7 +980,7 @@ export class WSGateway {
    */
   @Method
   public CallAction(
-    sender: Client,
+    client: Client,
     name: string,
     _action: string,
     params: moleculer.ActionParams
@@ -978,8 +990,8 @@ export class WSGateway {
 
       this.FindRoute(name, _action)
         .then(({ route, action }) => {
-          // Sender needs to authorize
-          if (route.authorization && !sender.authorized) {
+          // client needs to authorize
+          if (route.authorization && !client.authorized) {
             reject(new NotAuthorized());
           }
 
@@ -1005,16 +1017,18 @@ export class WSGateway {
           );
           (ctx as any)._metricStart(ctx.metrics);
 
+          ctx.meta.client = {
+            id: client.id,
+            props: client.props,
+            authorized: client.authorized
+          };
+
           if (route.onBeforeCall) {
             // In beforecall you can modify the params, the context and client props.
             Bluebird.Promise.resolve(
               route.onBeforeCall.call(this, ctx, <Request>{
                 name,
                 action,
-                sender: {
-                  id: sender.id,
-                  props: sender.props
-                },
                 params
               })
             )
@@ -1026,14 +1040,6 @@ export class WSGateway {
 
                   // Apply params
                   if (result.params) params = result.params;
-
-                  // Apply props
-                  if (result.props)
-                    this.clients.find(c => c.id === sender.id).props = _.extend(
-                      {},
-                      sender.props,
-                      result.props
-                    );
                 }
               })
               .catch(reject);
@@ -1051,10 +1057,6 @@ export class WSGateway {
                     <Request>{
                       name,
                       action,
-                      sender: {
-                        id: sender.id,
-                        props: sender.props
-                      },
                       params
                     },
                     res

@@ -1,13 +1,13 @@
 {
     "compilerOptions": {
         "target": "ESNext",
-        "sourceMap": false,
+        "sourceMap": true,
         "module": "commonjs",
         "moduleResolution": "node",
         "isolatedModules": false,
         "experimentalDecorators": true,
         "emitDecoratorMetadata": true,
-        "declaration": false,
+        "declaration": true,
         "noImplicitAny": false,
         "noStrictGenericChecks": true,
         "removeComments": true,
@@ -23,6 +23,7 @@
         }
     },
     "exclude": [
+        "examples",
         "node_modules",
         "typings/main",
         "typings/main.d.ts"
