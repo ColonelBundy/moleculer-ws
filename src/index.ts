@@ -21,19 +21,8 @@ import {
   BaseSchema
 } from 'moleculer-decorators';
 import { EventEmitter2 } from 'eventemitter2';
-import {
-  SocketNotOpen,
-  NotAuthorized,
-  RouteNotFound,
-  ClientError,
-  EncodeError,
-  DecodeError,
-  EndpointNotAvailable,
-  ServiceNotAvailable,
-  StraightError
-} from './errors';
-
-export * from './errors';
+import * as Errors from './errors';
+export { Errors };
 
 interface Flags {
   binary: boolean;
@@ -223,7 +212,7 @@ export class Client {
   public emit(event: string, data: object): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
-        reject(new SocketNotOpen());
+        reject(new Errors.SocketNotOpen());
       }
 
       this.server
@@ -258,7 +247,7 @@ export class Client {
 
       if (err) {
         _self
-          .SendResponse(new ClientError(err), ack)
+          .SendResponse(new Errors.ClientError(err), ack)
           .catch(e => _self.logger.error(e));
       } else {
         _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
@@ -299,11 +288,11 @@ export class Client {
                   return Bluebird.resolve(resp);
                 })
                 .catch(e => {
-                  return Bluebird.Promise.reject(new StraightError(e));
+                  return Bluebird.Promise.reject(new Errors.StraightError(e));
                 });
             } else {
               return Bluebird.Promise.reject(
-                new StraightError('Already authenticated')
+                new Errors.StraightError('Already authenticated')
               );
             }
           } else {
@@ -335,7 +324,9 @@ export class Client {
           _ack = -1; // Need to reset here so we don't send multiple responses
           return Bluebird.Promise.resolve();
         } else {
-          return Bluebird.Promise.reject(new StraightError('Malformed packet')); // Should never reach here unless type is undefined
+          return Bluebird.Promise.reject(
+            new Errors.StraightError('Malformed packet')
+          ); // Should never reach here unless type is undefined
         }
       })
       .then(response => {
@@ -345,18 +336,18 @@ export class Client {
       })
       .catch(e => {
         this.logger.error(e);
-        let error = new ClientError('Unexpected error');
+        let error = new Errors.ClientError('Unexpected error');
 
-        if (e instanceof RouteNotFound) {
-          error = new ClientError('Route not found');
-        } else if (e instanceof EndpointNotAvailable) {
-          error = new ClientError('Service currently not available');
-        } else if (e instanceof DecodeError) {
-          error = new ClientError('Malformed packet');
-        } else if (e instanceof EncodeError) {
-          error = new ClientError('Internal Server Error');
-        } else if (e instanceof StraightError) {
-          error = new ClientError(e.message);
+        if (e instanceof Errors.RouteNotFound) {
+          error = new Errors.ClientError('Route not found');
+        } else if (e instanceof Errors.EndpointNotAvailable) {
+          error = new Errors.ClientError('Service currently not available');
+        } else if (e instanceof Errors.DecodeError) {
+          error = new Errors.ClientError('Malformed packet');
+        } else if (e instanceof Errors.EncodeError) {
+          error = new Errors.ClientError('Internal Server Error');
+        } else if (e instanceof Errors.StraightError) {
+          error = new Errors.ClientError(e.message);
         }
 
         if (_ack > -1) {
@@ -383,7 +374,7 @@ export class Client {
   ): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
-        reject(new SocketNotOpen());
+        reject(new Errors.SocketNotOpen());
       }
 
       this.server
@@ -817,7 +808,7 @@ export class WSGateway {
           this.settings
             .decryption(message)
             .then(resolve)
-            .catch(err => new DecodeError(err));
+            .catch(err => new Errors.DecodeError(err));
         } else {
           switch (this.settings.encryption) {
             case 'JSON':
@@ -832,7 +823,7 @@ export class WSGateway {
         }
       } catch (e) {
         this.logger.fatal(e);
-        reject(new DecodeError());
+        reject(new Errors.DecodeError());
       }
     });
   }
@@ -852,7 +843,7 @@ export class WSGateway {
           this.settings
             .encryption(packet)
             .then(resolve)
-            .catch(err => new EncodeError(err));
+            .catch(err => new Errors.EncodeError(err));
         } else {
           switch (this.settings.encryption) {
             case 'JSON':
@@ -868,11 +859,14 @@ export class WSGateway {
       } catch (e) {
         this.logger.fatal(e);
 
-        if (e instanceof EncodeError || e instanceof DecodeError) {
+        if (
+          e instanceof Errors.EncodeError ||
+          e instanceof Errors.DecodeError
+        ) {
           return reject(e);
         }
 
-        return reject(new EncodeError());
+        return reject(new Errors.EncodeError());
       }
     });
   }
@@ -967,7 +961,7 @@ export class WSGateway {
           return resolve({ route, action }); // must resolve action as it could be an alias.
         }
 
-        return reject(new RouteNotFound());
+        return reject(new Errors.RouteNotFound());
       }
     });
   }
@@ -997,20 +991,20 @@ export class WSGateway {
         .then(({ route, action }) => {
           // client needs to authorize
           if (route.authorization && !client.authorized) {
-            reject(new NotAuthorized());
+            reject(new Errors.NotAuthorized());
           }
 
           this.logger.debug(`Finding endpoint for: ${action}`);
           const endpoint: any = this.broker.findNextActionEndpoint(action);
 
           if (endpoint instanceof moleculer.Errors.ServiceNotFoundError) {
-            return reject(new EndpointNotAvailable());
+            return reject(new Errors.EndpointNotAvailable());
           }
 
           // Credits Icebob
           // Action is not publishable
           if (endpoint.action && endpoint.action.publish === false) {
-            return reject(new RouteNotFound());
+            return reject(new Errors.RouteNotFound());
           }
 
           ctx = moleculer.Context.create(
