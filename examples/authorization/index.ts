@@ -1,6 +1,6 @@
 import moleculer = require('moleculer');
 import { Service, Action, Method } from 'moleculer-decorators';
-import { WSGateway, Settings, route, Request, BaseClass } from '../../';
+import { WSGateway, Settings, route, Request, BaseClass } from '../../src';
 import Bluebird = require('bluebird');
 
 @Service({
@@ -29,5 +29,14 @@ class Gateway extends BaseClass {
     }
 
     return Bluebird.Promise.reject('Invalid login');
+  }
+
+  @Method
+  deauthorize(client, params) {
+    client.props = ''; // Clear props
+
+    return Bluebird.Promise.resolve({
+      status: 'Success'
+    });
   }
 }

@@ -180,7 +180,8 @@ export class Client {
                 payload: obj,
                 type: PacketType.PROPS
               })
-              .then(payload => this.socket.send(payload));
+              .then(payload => this.socket.send(payload))
+              .catch(e => this.logger.error(e));
           }
 
           return true;
@@ -249,9 +250,10 @@ export class Client {
         _self
           .SendResponse(new Errors.ClientError(err), ack)
           .catch(e => _self.logger.error(e));
-      } else {
-        _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
+        return;
       }
+
+      _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
     };
   }
 
@@ -277,28 +279,50 @@ export class Client {
           const { name, action, data } = <ActionPacket>result.payload;
 
           this.logger.debug('Action packet');
-          if (name === 'internal' && action === 'auth') {
-            this.logger.debug('Auth action');
-            if (!this.authorized) {
-              this.logger.debug('Internal auth action');
-              return Bluebird.Promise.method(this.server.authorize)
-                .call(this, this, data)
-                .then(resp => {
-                  this.authorized = true;
-                  return Bluebird.resolve(resp);
-                })
-                .catch(e => {
-                  return Bluebird.Promise.reject(new Errors.StraightError(e));
-                });
-            } else {
+          if (name === 'internal') {
+            this.logger.debug('Internal action');
+
+            if (action === 'auth') {
+              if (!this.authorized) {
+                this.logger.debug('Internal auth action');
+                return Bluebird.Promise.method(this.server.authorize)
+                  .call(this, this, data)
+                  .then(resp => {
+                    this.authorized = true;
+                    return Bluebird.resolve(resp);
+                  })
+                  .catch(e => {
+                    return Bluebird.Promise.reject(new Errors.StraightError(e));
+                  });
+              }
+
               return Bluebird.Promise.reject(
                 new Errors.StraightError('Already authenticated')
               );
+            } else if (action === 'deauth') {
+              if (this.authorized) {
+                this.logger.debug('Internal deauth action');
+                return Bluebird.Promise.method(this.server.deauthorize)
+                  .call(this, this, data)
+                  .then(resp => {
+                    this.authorized = false;
+                    return Bluebird.resolve(resp);
+                  })
+                  .catch(e => {
+                    return Bluebird.Promise.reject(new Errors.StraightError(e));
+                  });
+              }
+
+              return Bluebird.Promise.reject(
+                new Errors.StraightError('Not authenticated')
+              );
             }
-          } else {
-            this.logger.debug('User defined system action');
-            return this.server.CallAction(this, name, action, data);
+
+            return Bluebird.Promise.reject(new Errors.RouteNotFound());
           }
+
+          this.logger.debug('User defined system action');
+          return this.server.CallAction(this, name, action, data);
         } else if (result.type === PacketType.EVENT) {
           const { event, data } = <EventPacket>result.payload;
 
@@ -323,11 +347,11 @@ export class Client {
           ); // Add a callback function so we can allow a response
           _ack = -1; // Need to reset here so we don't send multiple responses
           return Bluebird.Promise.resolve();
-        } else {
-          return Bluebird.Promise.reject(
-            new Errors.StraightError('Malformed packet')
-          ); // Should never reach here unless type is undefined
         }
+
+        return Bluebird.Promise.reject(
+          new Errors.StraightError('Malformed packet')
+        ); // Should never reach here unless type is undefined
       })
       .then(response => {
         if (_ack > -1) {
@@ -336,21 +360,21 @@ export class Client {
       })
       .catch(e => {
         this.logger.error(e);
-        let error = new Errors.ClientError('Unexpected error');
-
-        if (e instanceof Errors.RouteNotFound) {
-          error = new Errors.ClientError('Route not found');
-        } else if (e instanceof Errors.EndpointNotAvailable) {
-          error = new Errors.ClientError('Service currently not available');
-        } else if (e instanceof Errors.DecodeError) {
-          error = new Errors.ClientError('Malformed packet');
-        } else if (e instanceof Errors.EncodeError) {
-          error = new Errors.ClientError('Internal Server Error');
-        } else if (e instanceof Errors.StraightError) {
-          error = new Errors.ClientError(e.message);
-        }
-
         if (_ack > -1) {
+          let error = new Errors.ClientError('Unexpected error');
+
+          if (e instanceof Errors.RouteNotFound) {
+            error = new Errors.ClientError('Route not found');
+          } else if (e instanceof Errors.EndpointNotAvailable) {
+            error = new Errors.ClientError('Service currently not available');
+          } else if (e instanceof Errors.DecodeError) {
+            error = new Errors.ClientError('Malformed packet');
+          } else if (e instanceof Errors.EncodeError) {
+            error = new Errors.ClientError('Internal Server Error');
+          } else if (e instanceof Errors.StraightError) {
+            error = new Errors.ClientError(e.message);
+          }
+
           return this.SendResponse(error, _ack);
         }
       })
@@ -449,6 +473,7 @@ export class WSGateway {
   public methods: any;
   public logger: moleculer.LoggerInstance;
   public authorize = (client: Client, data: moleculer.GenericObject) => {};
+  public deauthorize = (client: Client, data: moleculer.GenericObject) => {};
   // end hacks
 
   public settings: Settings = {
