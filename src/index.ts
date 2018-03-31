@@ -244,8 +244,8 @@ export class Client {
   public ResponseCallback(data, ack?): (err: any, data?: any) => void {
     const _self = this;
     return function(err, data?) {
+      // No need to send back a response if the clien't doesn't want one.
       if (_.isNil(ack)) {
-        // No need to send back a response if the clien't doesn't want one.
         return;
       }
 
@@ -275,9 +275,6 @@ export class Client {
       .DecodePacket(packet)
       .then(result => {
         _ack = result.ack;
-
-        this.logger.info('ACK: ', _ack);
-
         if (result.type === PacketType.ACTION) {
           const { name, action, data } = <ActionPacket>result.payload;
 
@@ -691,27 +688,31 @@ export class WSGateway {
   ): void {
     const client: Client = this.clients.find(c => c.id === id);
 
-    if (!client && !isExternal) {
-      const external = this.clients_external.find(c => c.id === id);
-
-      if (external) {
-        this.logger.debug(
-          `Sending to a client with id: ${id} on node ${external.nodeID}`
-        );
-        this.broker.emit(
-          'ws.client.send',
-          <EventPacket>{
-            event,
-            data
-          },
-          external.nodeID
-        );
-      } else {
-        this.logger.error(`Client ${id} not found`);
-      }
-    } else {
+    if (client) {
       this.logger.debug(`Sending to a client with id: ${id}`);
       client.emit(event, data);
+      return;
+    }
+
+    if (!isExternal) {
+      const external = this.clients_external.find(c => c.id === id);
+
+      if (!external) {
+        this.logger.error(`Client ${id} not found`);
+        return;
+      }
+
+      this.logger.debug(
+        `Sending to a client with id: ${id} on node ${external.nodeID}`
+      );
+      this.broker.emit(
+        'ws.client.send',
+        <EventPacket>{
+          event,
+          data
+        },
+        external.nodeID
+      );
     }
   }
 
@@ -798,7 +799,7 @@ export class WSGateway {
 
     this.clients.push(client); // Add client
 
-    this.logger.info(`Client: ${client.id} connected`);
+    this.logger.debug(`Client: ${client.id} connected`);
 
     // Let other nodes know about this client
     this.broker.broadcast(
@@ -821,7 +822,7 @@ export class WSGateway {
   private DisconnectHandler(client: Client): void {
     this.clients.splice(this.clients.findIndex(c => c.id === client.id)); // Remove client
 
-    this.logger.info(`Client: ${client.id} disconnected`);
+    this.logger.debug(`Client: ${client.id} disconnected`);
 
     // Let other nodes know this client has disconnected
     this.broker.broadcast(
@@ -852,18 +853,19 @@ export class WSGateway {
           this.settings
             .decryption(message)
             .then(resolve)
-            .catch(err => new Errors.DecodeError(err));
-        } else {
-          switch (this.settings.encryption) {
-            case 'JSON':
-              resolve(JSON.parse(message));
-              break;
+            .catch(e => new Errors.DecodeError(e));
+          return;
+        }
 
-            default:
-            case 'Binary':
-              resolve(JSON.parse(Buffer.from(message).toString('utf8')));
-              break;
-          }
+        switch (this.settings.encryption) {
+          case 'JSON':
+            resolve(JSON.parse(message));
+            break;
+
+          default:
+          case 'Binary':
+            resolve(JSON.parse(Buffer.from(message).toString('utf8')));
+            break;
         }
       } catch (e) {
         this.logger.fatal(e);
@@ -883,22 +885,26 @@ export class WSGateway {
   public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
     return new Bluebird.Promise((resolve, reject) => {
       try {
-        if (_.isFunction(this.settings.encryption)) {
+        if (
+          _.isFunction(this.settings.encryption) &&
+          _.isFunction(this.settings.decryption)
+        ) {
           this.settings
             .encryption(packet)
             .then(resolve)
-            .catch(err => new Errors.EncodeError(err));
-        } else {
-          switch (this.settings.encryption) {
-            case 'JSON':
-              resolve(JSON.stringify(packet));
-              break;
+            .catch(e => new Errors.EncodeError(e));
+          return;
+        }
 
-            default:
-            case 'Binary':
-              resolve(new Buffer(JSON.stringify(packet)));
-              break;
-          }
+        switch (this.settings.encryption) {
+          case 'JSON':
+            resolve(JSON.stringify(packet));
+            break;
+
+          default:
+          case 'Binary':
+            resolve(new Buffer(JSON.stringify(packet)));
+            break;
         }
       } catch (e) {
         this.logger.fatal(e);
