@@ -4,7 +4,7 @@ import path = require('path');
 import Gateway = require('../services/gateway.service');
 import { ServiceBroker, Context, Service } from 'moleculer';
 import ws = require('ws');
-import { Client } from 'moleculer-ws-client';
+import { Client } from 'moleculer-ws-client/dist';
 
 describe('Gateway', function() {
   this.timeout(10000);
@@ -118,6 +118,25 @@ describe('Gateway', function() {
           assert.equal(e, 'Already authenticated');
           done();
         });
+    });
+
+    it('Deauthenticate', function(done) {
+      client.deauthenticate().then(d => {
+        assert.equal(d, 'Done');
+        done();
+      });
+    });
+
+    it('Props empty', function(done) {
+      assert.notStrictEqual(client.props, {});
+      done();
+    });
+
+    it('Deauthenticate not authenticated', function(done) {
+      client.deauthenticate().catch(e => {
+        assert.equal(e, 'Not authenticated');
+        done();
+      });
     });
   });
 });

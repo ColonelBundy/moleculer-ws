@@ -1724,10 +1724,9 @@ moleculer-repl@^0.4.0:
 
 moleculer-ws-client@colonelbundy/moleculer-ws-client:
   version "1.0.0"
-  resolved "https://codeload.github.com/colonelbundy/moleculer-ws-client/tar.gz/8f0ba85b1477f5dba7f3eaa638d801b36f3e1d5f"
+  resolved "https://codeload.github.com/colonelbundy/moleculer-ws-client/tar.gz/72c3945dc1620e4a6335748702291adf52b4c915"
   dependencies:
     eventemitter2 "^5.0.1"
-    typescript "^2.7.1"
     ws "^5.0.0"
 
 moleculer@^0.12.1, moleculer@moleculerjs/moleculer:

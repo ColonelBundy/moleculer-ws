@@ -141,9 +141,9 @@ export class Client {
   public readonly id: string = shortid.generate();
   public readonly socket: uws;
   public authorized: boolean = false;
-  public props: moleculer.GenericObject = {}; // Store for username etc..
   public alive: boolean = true;
   public ack_id: 0;
+  private _props: moleculer.GenericObject = {};
 
   /**
    * Creates an instance of Client.
@@ -155,42 +155,45 @@ export class Client {
     this.socket = _socket;
     this.server = _server;
     this.logger = this.server.broker.logger;
-
-    // Sync prop updates to all nodes, if you were to modify the object,
-    this.props = new Proxy(
-      {},
-      {
-        set: (obj, prop, value) => {
-          obj[prop] = value;
-
-          // Send update to all nodes
-          this.server.broker.broadcast(
-            'ws.client.update',
-            {
-              id: this.id,
-              props: obj
-            },
-            'ws'
-          );
-
-          // Send update to client as well.
-          if (this.socket.readyState === this.socket.OPEN) {
-            this.server
-              .EncodePacket({
-                payload: obj,
-                type: PacketType.PROPS
-              })
-              .then(payload => this.socket.send(payload))
-              .catch(e => this.logger.error(e));
-          }
-
-          return true;
-        }
-      }
-    );
-
     this.socket.on('message', this.messageHandler.bind(this));
     this.socket.on('pong', () => (this.alive = true));
+  }
+
+  /**
+   * Set props
+   * Sync prop updates to all nodes, if you were to modify the object,
+   *
+   * @memberof Client
+   */
+  public set props(value: any) {
+    this.server.broker.broadcast(
+      'ws.client.update',
+      {
+        id: this.id,
+        props: value
+      },
+      'ws'
+    );
+
+    // Send update to client as well.
+    if (this.socket.readyState === this.socket.OPEN) {
+      this.server
+        .EncodePacket({
+          payload: value,
+          type: PacketType.PROPS
+        })
+        .then(payload => this.socket.send(payload))
+        .catch(e => this.logger.error(e));
+    }
+  }
+
+  /**
+   * Get Props
+   *
+   * @memberof Client
+   */
+  public get props() {
+    return this._props;
   }
 
   /**
@@ -285,10 +288,18 @@ export class Client {
             if (action === 'auth') {
               if (!this.authorized) {
                 this.logger.debug('Internal auth action');
+
+                // Placeholder to allow changing of props
+                let cProp = {
+                  id: this.id,
+                  props: this.props
+                };
+
                 return Bluebird.Promise.method(this.server.authorize)
-                  .call(this, this, data)
+                  .call(this, cProp, data)
                   .then(resp => {
                     this.authorized = true;
+                    this.props = cProp.props;
                     return Bluebird.resolve(resp);
                   })
                   .catch(e => {
@@ -302,10 +313,18 @@ export class Client {
             } else if (action === 'deauth') {
               if (this.authorized) {
                 this.logger.debug('Internal deauth action');
+
+                // Placeholder to allow changing of props
+                let cProp = {
+                  id: this.id,
+                  props: this.props
+                };
+
                 return Bluebird.Promise.method(this.server.deauthorize)
-                  .call(this, this, data)
+                  .call(this, cProp, data)
                   .then(resp => {
                     this.authorized = false;
+                    this.props = cProp.props;
                     return Bluebird.resolve(resp);
                   })
                   .catch(e => {

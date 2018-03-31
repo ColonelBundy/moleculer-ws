@@ -52,6 +52,12 @@ class Gateway extends BaseClass {
 
     return Bluebird.Promise.reject('Invalid login');
   }
+
+  @Method
+  deauthorize(client, params) {
+    client.props = {};
+    return Bluebird.Promise.resolve('Done');
+  }
 }
 
 module.exports = Gateway;
