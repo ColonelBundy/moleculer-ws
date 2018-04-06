@@ -55,6 +55,7 @@ export interface ResponsePacket {
 
 export interface Settings {
   port: number;
+  onlyAnnonceAuth?: boolean // Will only emit 'connection' when/if user is authenticated 
   ip?: string;
   heartbeat?: {
     enabled: boolean;
@@ -548,6 +549,11 @@ export class Client {
                   .then(resp => {
                     this.authorized = true;
                     this.props = cProp.props;
+
+                    if (this.server.settings.onlyAnnonceAuth) {
+                      this.server.Emitter.emit('connection', this);
+                    }
+
                     return Bluebird.resolve(resp);
                   })
                   .catch(e => {
@@ -728,6 +734,7 @@ export class WSGateway {
 
   public settings: Settings = {
     port: parseInt(process.env.PORT) || 3000,
+    onlyAnnonceAuth: false,
     ip: process.env.IP || '0.0.0.0',
     perMessageDeflate: false,
     path: '/',
@@ -1035,7 +1042,9 @@ export class WSGateway {
       'ws'
     );
 
-    this.Emitter.emit('connection', client);
+    if (!this.settings.onlyAnnonceAuth) {
+      this.Emitter.emit('connection', client);
+    }
   }
 
   /**
