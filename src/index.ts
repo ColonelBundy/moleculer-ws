@@ -24,11 +24,6 @@ import { EventEmitter2 } from 'eventemitter2';
 import * as Errors from './errors';
 export { Errors };
 
-interface Flags {
-  binary: boolean;
-  masked: boolean;
-}
-
 export enum PacketType {
   EVENT,
   ACTION,
