@@ -488,7 +488,7 @@ export class Client {
   private messageHandler(packet: Buffer | string): void {
     let _ack: number; // To respend if client want a response;
 
-    this.logger.debug('Incoming message', packet);
+    this.logger.debug('Incoming message');
     this.server
       .DecodePacket(packet)
       .then(result => {
@@ -1124,7 +1124,8 @@ export class WSGateway {
           _.isFunction(this.settings.encryption) &&
           _.isFunction(this.settings.decryption)
         ) {
-          Bluebird.method(this.settings.decryption).call(this, message)
+          Bluebird.method(this.settings.decryption)
+            .call(this, message)
             .then(resolve)
             .catch(e => new Errors.DecodeError(e));
           return;
@@ -1167,7 +1168,8 @@ export class WSGateway {
           _.isFunction(this.settings.encryption) &&
           _.isFunction(this.settings.decryption)
         ) {
-          Bluebird.method(this.settings.encryption).call(this, packet)
+          Bluebird.method(this.settings.encryption)
+            .call(this, packet)
             .then(resolve)
             .catch(e => new Errors.EncodeError(e));
           return;
@@ -1236,6 +1238,12 @@ export class WSGateway {
         );
         route.authorization = false;
       }
+    }
+
+    if (route.name === 'internal') {
+      this.logger.warn(
+        `Route name "internal" is reserved and will therefore never be used.`
+      );
     }
 
     if (!route.mappingPolicy) route.mappingPolicy = 'all';
@@ -1419,7 +1427,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.connected'(payload: syncPacket, sender) {
+  private 'ws.client.connected'(payload: syncPacket, sender: any) {
     if (sender === this.broker.nodeID) {
       return;
     }
@@ -1440,7 +1448,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.disconnected'(payload: syncPacket, sender) {
+  private 'ws.client.disconnected'(payload: syncPacket, sender: any) {
     if (sender === this.broker.nodeID) {
       return;
     }
@@ -1455,15 +1463,16 @@ export class WSGateway {
   /**
    * Let other nodes send to all clients on this server
    *
-   * @public
-   * @param {Packet} payload
+   * @private
+   * @param {EventPacket} payload
+   * @param {any} sender
    * @returns
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
-  private 'ws.client.SendToAll'(payload: EventPacket, sender) {
+  private 'ws.client.SendToAll'(payload: EventPacket, sender: any) {
     if (sender === this.broker.nodeID) {
       return;
     }
@@ -1483,7 +1492,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.send'(payload: externalSendPacket, sender) {
+  private 'ws.client.send'(payload: externalSendPacket, sender: any) {
     const id = payload.id,
       packet: EventPacket = payload.packet;
 
@@ -1504,7 +1513,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.sync'(payload: syncPacket, sender) {
+  private 'ws.client.sync'(payload: syncPacket, sender: any) {
     if (sender === this.broker.nodeID) {
       return;
     }
@@ -1525,7 +1534,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.origin.emit'(payload: externalSendPacket, sender) {
+  private 'ws.client.origin.emit'(payload: externalSendPacket, sender: any) {
     const client = this.clients.find(c => c.id === payload.id);
     if (sender === this.broker.nodeID || !client) {
       return;
@@ -1551,7 +1560,10 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.origin.broadcast'(payload: externalSendPacket, sender) {
+  private 'ws.client.origin.broadcast'(
+    payload: externalSendPacket,
+    sender: any
+  ) {
     const client = this.clients.find(c => c.id === payload.id);
     if (sender === this.broker.nodeID || !client) {
       return;
@@ -1577,7 +1589,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.origin.send'(payload: externalSendPacket, sender) {
+  private 'ws.client.origin.send'(payload: externalSendPacket, sender: any) {
     const client = this.clients.find(c => c.id === payload.id);
     if (sender === this.broker.nodeID || !client) {
       return;
@@ -1601,7 +1613,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.origin.sync'(payload: syncPacket, sender) {
+  private 'ws.client.origin.sync'(payload: syncPacket, sender: any) {
     const client = this.clients.find(c => c.id === payload.id);
     if (sender === this.broker.nodeID || !client) {
       return;
@@ -1619,7 +1631,7 @@ export class WSGateway {
    * @memberof WSGateway
    */
   @Event()
-  private '$node.disconnected'(payload, sender) {
+  private '$node.disconnected'(payload: any, sender: any) {
     // Remove clients connected to the disconnected node
     this.logger.debug(`Node: ${sender} disconnected`);
     this.clients_external = this.clients_external.filter(
