@@ -33,4 +33,30 @@ class Gateway extends BaseClass {
       this.send(client.id, 'eventName', { foo: 'bar' }); // to send to a client with client id (will still send to the client if he's on another node)
     });
   }
+
+  @Method
+  onBeforeEvent(event, client, data) {
+
+    // Modify data before event processing
+    data = {
+      foo: "bar"
+    }
+
+    return data; // Must return
+  }
+
+  @Method
+  onAfterEvent(event, client, err, data) {
+
+    if (err) {
+      err = 'Modify the error response (if callEvent) :D'
+    }
+
+    // Modify response data (if callEvent)
+    data = {
+      foo: "bar"
+    }
+
+    return { err, data }; // Must return
+  }
 }

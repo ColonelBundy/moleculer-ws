@@ -576,9 +576,9 @@ export class Client {
                 );
               }
 
-              return Bluebird.resolve();
+              return data;
             })
-            .then(() => {
+            .then(_data => {
               // Server listener
               /* Works as: 
                 this.on('action_name', (client, data, respond) => {
@@ -593,29 +593,27 @@ export class Client {
               this.server.Emitter.emit(
                 event,
                 this,
-                data,
+                _data,
                 _ack < 0
                   ? _.noop // Use noop if client doesn't want a response
-                  : function(err, data?): void {
+                  : function(err, response?): void {
                       Bluebird.resolve()
                         .then(() => {
                           if (_.isFunction(_self.server.onAfterEvent)) {
                             return Bluebird.method(
                               _self.server.onAfterEvent
-                            ).call(_self, _self, event, err, data);
+                            ).call(_self, _self, event, err, response);
                           }
 
-                          return { err, data };
+                          return { err, response };
                         })
                         .then(result => {
+                          let response = result.response;
                           if (result.err) {
-                            return _self.SendResponse(
-                              new Errors.ClientError(result.err),
-                              _ack
-                            );
+                            response = new Errors.ClientError(result.err);
                           }
 
-                          return _self.SendResponse(result.data, _ack);
+                          return _self.SendResponse(result.response, _ack);
                         })
                         .catch(e => _self.logger.error(e));
                     }
@@ -707,7 +705,7 @@ export class Client {
 }
 
 // Only for type support
-export class BaseClass extends BaseSchema {
+export declare class BaseClass extends BaseSchema {
   public on: (
     event: string,
     callback: (
