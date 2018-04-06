@@ -13,14 +13,8 @@ import _ = require('lodash');
 import nanomatch = require('nanomatch');
 import shortid = require('shortid');
 import Bluebird = require('bluebird');
-import {
-  Service,
-  Action,
-  Event,
-  Method,
-  BaseSchema
-} from 'moleculer-decorators';
 import { EventEmitter2 } from 'eventemitter2';
+import { BaseSchema, Event, Method, Service } from 'moleculer-decorators';
 import * as Errors from './errors';
 export { Errors };
 
@@ -55,7 +49,7 @@ export interface ResponsePacket {
 
 export interface Settings {
   port: number;
-  onlyAnnonceAuth?: boolean // Will only emit 'connection' when/if user is authenticated 
+  onlyAnnonceAuth?: boolean; // Will only emit 'connection' when/if user is authenticated
   ip?: string;
   heartbeat?: {
     enabled: boolean;
@@ -398,7 +392,7 @@ export class Client {
    * @memberof Client
    */
   public send(event: string, data: object): Bluebird<{}> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new Errors.SocketNotOpen());
       }
@@ -425,7 +419,7 @@ export class Client {
    * @memberof Client
    */
   public emit(event: string, data: object): Bluebird<{}> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new Errors.SocketNotOpen());
       }
@@ -454,7 +448,7 @@ export class Client {
    * @memberof Client
    */
   public broadcast(event: string, data: moleculer.GenericObject): Bluebird<{}> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new Errors.SocketNotOpen());
       }
@@ -482,34 +476,6 @@ export class Client {
         })
         .catch(reject);
     });
-  }
-
-  /**
-   * Handler to allow a response to an event
-   *
-   * @public
-   * @param {any} data
-   * @param {any} [ack]
-   * @returns {(err: any, data: any) => void}
-   * @memberof Client
-   */
-  public ResponseCallback(data, ack?): (err: any, data?: any) => void {
-    const _self = this;
-    return function(err, data?) {
-      // No need to send back a response if the clien't doesn't want one.
-      if (_.isNil(ack)) {
-        return;
-      }
-
-      if (err) {
-        _self
-          .SendResponse(new Errors.ClientError(err), ack)
-          .catch(e => _self.logger.error(e));
-        return;
-      }
-
-      _self.SendResponse(data, ack).catch(e => _self.logger.error(e));
-    };
   }
 
   /**
@@ -544,7 +510,7 @@ export class Client {
                   props: this.props
                 };
 
-                return Bluebird.Promise.method(this.server.authorize)
+                return Bluebird.method(this.server.authorize)
                   .call(this, cProp, data)
                   .then(resp => {
                     this.authorized = true;
@@ -557,11 +523,11 @@ export class Client {
                     return Bluebird.resolve(resp);
                   })
                   .catch(e => {
-                    return Bluebird.Promise.reject(new Errors.StraightError(e));
+                    return Bluebird.reject(new Errors.StraightError(e));
                   });
               }
 
-              return Bluebird.Promise.reject(
+              return Bluebird.reject(
                 new Errors.StraightError('Already authenticated')
               );
             } else if (action === 'deauth') {
@@ -574,7 +540,7 @@ export class Client {
                   props: this.props
                 };
 
-                return Bluebird.Promise.method(this.server.deauthorize)
+                return Bluebird.method(this.server.deauthorize)
                   .call(this, cProp, data)
                   .then(resp => {
                     this.authorized = false;
@@ -582,16 +548,16 @@ export class Client {
                     return Bluebird.resolve(resp);
                   })
                   .catch(e => {
-                    return Bluebird.Promise.reject(new Errors.StraightError(e));
+                    return Bluebird.reject(new Errors.StraightError(e));
                   });
               }
 
-              return Bluebird.Promise.reject(
+              return Bluebird.reject(
                 new Errors.StraightError('Not authenticated')
               );
             }
 
-            return Bluebird.Promise.reject(new Errors.RouteNotFound());
+            return Bluebird.reject(new Errors.RouteNotFound());
           }
 
           this.logger.debug('User defined system action');
@@ -599,26 +565,70 @@ export class Client {
         } else if (result.type === PacketType.EVENT) {
           const { event, data } = <EventPacket>result.payload;
 
-          // Server listener
-          /* Works as: 
-              this.on('action_name', (client, data, respond) => {
-                respond(error, data_to_respond_with) // to respond to this particular request.
-                this.emit(...) // to send to everyone on this node
-                this.broadcast(...) // to send to everyone on all nodes
-                this.send(client.id, ...) // to send to a client with id (will still send to the client if he's on another node)
-              });
-            */
-          this.server.Emitter.emit(
-            event,
-            this,
-            data,
-            this.ResponseCallback(data, _ack)
-          ); // Add a callback function so we can allow a response
-          _ack = -1; // Need to reset here so we don't send multiple responses
-          return Bluebird.Promise.resolve();
+          Bluebird.resolve()
+            .then(() => {
+              if (_.isFunction(this.server.onBeforeEvent)) {
+                return Bluebird.method(this.server.onBeforeEvent).call(
+                  this,
+                  this,
+                  event,
+                  data
+                );
+              }
+
+              return Bluebird.resolve();
+            })
+            .then(() => {
+              // Server listener
+              /* Works as: 
+                this.on('action_name', (client, data, respond) => {
+                  respond(error, data_to_respond_with) // to respond to this particular request.
+                  this.emit(...) // to send to everyone on this node
+                  this.broadcast(...) // to send to everyone on all nodes
+                  this.send(client.id, ...) // to send to a client with id (will still send to the client if he's on another node)
+                });
+              */
+              const _self = this;
+
+              this.server.Emitter.emit(
+                event,
+                this,
+                data,
+                _ack < 0
+                  ? _.noop // Use noop if client doesn't want a response
+                  : function(err, data?): void {
+                      Bluebird.resolve()
+                        .then(() => {
+                          if (_.isFunction(_self.server.onAfterEvent)) {
+                            return Bluebird.method(
+                              _self.server.onAfterEvent
+                            ).call(_self, _self, event, err, data);
+                          }
+
+                          return { err, data };
+                        })
+                        .then(result => {
+                          if (result.err) {
+                            return _self.SendResponse(
+                              new Errors.ClientError(result.err),
+                              _ack
+                            );
+                          }
+
+                          return _self.SendResponse(result.data, _ack);
+                        })
+                        .catch(e => _self.logger.error(e));
+                    }
+              );
+            })
+            .catch(e => this.logger.error(e));
+
+          // Need to reset ack here so we don't send double response
+          _ack = -1;
+          return Bluebird.resolve();
         }
 
-        return Bluebird.Promise.reject(
+        return Bluebird.reject(
           new Errors.StraightError('Malformed packet')
         ); // Should never reach here unless type is undefined
       })
@@ -644,7 +654,21 @@ export class Client {
             error = new Errors.ClientError(e.message);
           }
 
-          return this.SendResponse(error, _ack);
+          return Bluebird.resolve()
+            .then(() => {
+              if (_.isFunction(this.server.onError)) {
+                return Bluebird.method(this.server.onError).call(
+                  this,
+                  this,
+                  error
+                );
+              }
+
+              return error;
+            })
+            .then((error: moleculer.GenericObject) => {
+              return this.SendResponse(error, _ack);
+            });
         }
       })
       .catch(e => {
@@ -661,11 +685,11 @@ export class Client {
    * @returns {Bluebird<{}>}
    * @memberof Client
    */
-  private SendResponse(
+  public SendResponse(
     data: moleculer.GenericObject = {},
     ack: number
   ): Bluebird<{}> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new Errors.SocketNotOpen());
       }
@@ -724,13 +748,25 @@ export class BaseClass extends BaseSchema {
 
 @Service()
 export class WSGateway {
-  // begin hacks (these will be "stripped")
+  // begin types (these will be "stripped" by moleculer-decorators)
   private name: string;
   public broker: moleculer.ServiceBroker;
   public logger: moleculer.LoggerInstance;
   public authorize = (client: Client, data: moleculer.GenericObject) => {};
   public deauthorize = (client: Client, data: moleculer.GenericObject) => {};
-  // end hacks
+  public onBeforeEvent = (
+    client: Client,
+    event: string,
+    data: moleculer.GenericObject
+  ) => {};
+  public onAfterEvent = (
+    client: Client,
+    event: string,
+    err: moleculer.GenericObject,
+    data: moleculer.GenericObject
+  ) => {};
+  public onError = (client: Client, error: Error) => {};
+  // end types
 
   public settings: Settings = {
     port: parseInt(process.env.PORT) || 3000,
@@ -1084,7 +1120,7 @@ export class WSGateway {
    */
   @Method
   public DecodePacket(message: Buffer | string | any): Bluebird<Packet> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       try {
         if (
           _.isFunction(this.settings.encryption) &&
@@ -1123,7 +1159,7 @@ export class WSGateway {
    */
   @Method
   public EncodePacket(packet: Packet): Bluebird<Buffer | string> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       try {
         if (
           _.isFunction(this.settings.encryption) &&
@@ -1223,7 +1259,7 @@ export class WSGateway {
     name: string,
     action: string
   ): Bluebird<{ route: route; action: string }> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       if (this.settings.routes && this.settings.routes.length > 0) {
         for (let route of this.settings.routes) {
           if (route.name !== name) {
@@ -1274,7 +1310,7 @@ export class WSGateway {
     _action: string,
     params: moleculer.ActionParams
   ): Bluebird<any> {
-    return new Bluebird.Promise((resolve, reject) => {
+    return new Bluebird((resolve, reject) => {
       let ctx: moleculer.Context;
 
       this.FindRoute(name, _action)
@@ -1314,7 +1350,7 @@ export class WSGateway {
 
           if (route.onBeforeCall) {
             // In beforecall you can modify the params, the context and client props.
-            Bluebird.Promise.resolve(
+            Bluebird.resolve(
               route.onBeforeCall.call(this, ctx, <Request>{
                 name,
                 action,
@@ -1335,11 +1371,11 @@ export class WSGateway {
           }
 
           return ctx
-            .call(endpoint, params)
+            .call(endpoint, params, route.callOptions || {})
             .then(res => {
               // In aftercall you can modify the result.
               if (route.onAfterCall) {
-                Bluebird.Promise.resolve(
+                Bluebird.resolve(
                   route.onAfterCall.call(
                     this,
                     ctx,
