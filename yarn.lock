@@ -1729,9 +1729,9 @@ moleculer-ws-client@colonelbundy/moleculer-ws-client:
     eventemitter2 "^5.0.1"
     ws "^5.0.0"
 
-moleculer@^0.12.1, moleculer@moleculerjs/moleculer:
+moleculer@^0.12.1:
   version "0.12.1"
-  resolved "https://codeload.github.com/moleculerjs/moleculer/tar.gz/62226510cbaa65c0ef87668857ce13fc34ce8b48"
+  resolved "https://registry.yarnpkg.com/moleculer/-/moleculer-0.12.1.tgz#b12965b8545f5ace2925483bf79dc34fc147072e"
   dependencies:
     args "3.0.8"
     bluebird "3.5.1"

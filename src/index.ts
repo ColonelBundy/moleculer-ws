@@ -721,7 +721,6 @@ export class WSGateway {
   // begin hacks (these will be "stripped")
   private name: string;
   public broker: moleculer.ServiceBroker;
-  public methods: any;
   public logger: moleculer.LoggerInstance;
   public authorize = (client: Client, data: moleculer.GenericObject) => {};
   public deauthorize = (client: Client, data: moleculer.GenericObject) => {};
