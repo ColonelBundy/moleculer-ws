@@ -353,17 +353,14 @@ export class Client {
    * @memberof Client
    */
   private Sync() {
-    const packet: syncPacket = {
-      id: this.id,
-      props: this._props,
-      authorized: this._authorized
-    };
-
     // Sync to client
     if (this.socket.readyState === this.socket.OPEN) {
       this.server
         .EncodePacket({
-          payload: packet,
+          payload: <syncPacket>{
+            props: this._props,
+            authorized: this._authorized
+          },
           type: PacketType.SYNC
         })
         .then(payload => this.socket.send(payload))
@@ -371,7 +368,15 @@ export class Client {
     }
 
     // Sync to nodes
-    this.server.broker.broadcast('ws.client.sync', packet, 'ws');
+    this.server.broker.broadcast(
+      'ws.client.sync',
+      <syncPacket>{
+        id: this.id,
+        props: this._props,
+        authorized: this._authorized
+      },
+      'ws'
+    );
   }
 
   /**
@@ -565,20 +570,16 @@ export class Client {
         } else if (result.type === PacketType.EVENT) {
           const { event, data } = <EventPacket>result.payload;
 
-          Bluebird.resolve()
-            .then(() => {
-              if (_.isFunction(this.server.onBeforeEvent)) {
-                return Bluebird.method(this.server.onBeforeEvent).call(
-                  this,
-                  this,
-                  event,
-                  data
-                );
-              }
+          return Bluebird.try(() => {
+            if (_.isFunction(this.server.onBeforeEvent)) {
+              return Bluebird.method(this.server.onBeforeEvent)
+                .call(this, this, event, data)
+                .catch(e => Bluebird.reject(new Errors.StraightError(e)));
+            }
 
-              return data;
-            })
-            .then(_data => {
+            return data;
+          }).then(_data => {
+            return new Bluebird((resolve, reject) => {
               // Server listener
               /* Works as: 
                 this.on('action_name', (client, data, respond) => {
@@ -588,42 +589,36 @@ export class Client {
                   this.send(client.id, ...) // to send to a client with id (will still send to the client if he's on another node)
                 });
               */
-              const _self = this;
-
               this.server.Emitter.emit(
                 event,
                 this,
                 _data,
-                _ack < 0
-                  ? _.noop // Use noop if client doesn't want a response
-                  : function(err, response?): void {
-                      Bluebird.resolve()
-                        .then(() => {
-                          if (_.isFunction(_self.server.onAfterEvent)) {
-                            return Bluebird.method(
-                              _self.server.onAfterEvent
-                            ).call(_self, _self, event, err, response);
-                          }
+                _ack > -1
+                  ? (err, response?) => {
+                      Bluebird.try(() => {
+                        if (_.isFunction(this.server.onAfterEvent)) {
+                          return Bluebird.method(this.server.onAfterEvent)
+                            .call(this, this, event, err, response)
+                            .then(resolve)
+                            .catch(e => {
+                              if (e instanceof Error) {
+                                return reject(e);
+                              }
+                              return reject(new Errors.StraightError(e));
+                            });
+                        }
 
-                          return { err, response };
-                        })
-                        .then(result => {
-                          let response = result.response;
-                          if (result.err) {
-                            response = new Errors.ClientError(result.err);
-                          }
+                        if (err) {
+                          return reject(new Errors.StraightError(err));
+                        }
 
-                          return _self.SendResponse(result.response, _ack);
-                        })
-                        .catch(e => _self.logger.error(e));
+                        return resolve(response);
+                      });
                     }
+                  : _.noop // Use noop if client doesn't want a response (emitEvent)
               );
-            })
-            .catch(e => this.logger.error(e));
-
-          // Need to reset ack here so we don't send double response
-          _ack = -1;
-          return Bluebird.resolve();
+            });
+          });
         }
 
         return Bluebird.reject(new Errors.StraightError('Malformed packet')); // Should never reach here unless type is undefined
@@ -646,7 +641,10 @@ export class Client {
             error = new Errors.ClientError('Malformed packet');
           } else if (e instanceof Errors.EncodeError) {
             error = new Errors.ClientError('Internal Server Error');
-          } else if (e instanceof Errors.StraightError) {
+          } else if (
+            e instanceof Errors.StraightError ||
+            e instanceof moleculer.Errors.MoleculerError
+          ) {
             error = new Errors.ClientError(e.message);
           }
 
@@ -705,7 +703,7 @@ export class Client {
 }
 
 // Only for type support
-export declare class BaseClass extends BaseSchema {
+export class BaseClass extends BaseSchema {
   public on: (
     event: string,
     callback: (

@@ -38,10 +38,17 @@ describe('Gateway', function() {
       client
         .call('test', 'Gateway.EchoParams', payload)
         .then(data => {
-          assert.notStrictEqual(payload, data);
+          assert.deepEqual(payload, data);
           done();
         })
         .catch(e => done(e));
+    });
+
+    it('call action with error', function(done) {
+      client.call('test', 'Gateway.ErrorAction', payload).catch(e => {
+        assert.equal(e, 'Some error');
+        done();
+      });
     });
 
     it('call action not found', function(done) {
@@ -54,7 +61,7 @@ describe('Gateway', function() {
     it('emit action', function(done) {
       client.emit('test', 'Gateway.EmitAction', payload);
       client.on('EmitAction', data => {
-        assert.notStrictEqual(payload, data);
+        assert.deepEqual(payload, data);
         done();
       });
     });
@@ -65,10 +72,20 @@ describe('Gateway', function() {
       client
         .callEvent('CallEvent', payload)
         .then(data => {
-          assert.notStrictEqual(payload, data);
+          assert.deepEqual(payload, data);
           done();
         })
         .catch(e => done(e));
+    });
+
+    it('call event with error', function(done) {
+      client
+        .callEvent('CallEventError', payload)
+        .then(d => done(d))
+        .catch(e => {
+          assert.equal('Some error', e);
+          done();
+        });
     });
 
     it('emit event', function(done) {
@@ -77,9 +94,28 @@ describe('Gateway', function() {
         done();
       });
     });
+
+    it('onBeforeEvent', function(done) {
+      client.callEvent('onBeforeEvent', payload).then(data => {
+        assert.deepEqual({ wrong: 'data' }, data);
+        done();
+      });
+    });
+
+    it('onAfterEvent', function(done) {
+      client.callEvent('onAfterEvent', payload).then(data => {
+        assert.deepEqual({ ...payload, after: 'nice' }, data);
+        done();
+      });
+    });
   });
 
   describe('Authorize', function() {
+    it('Authroize status should be false', function(done) {
+      assert.equal(client.authorized, false);
+      done();
+    });
+
     it('Wrong details', function(done) {
       client
         .authenticate({
@@ -108,6 +144,11 @@ describe('Gateway', function() {
       done();
     });
 
+    it('Authroize status should be true', function(done) {
+      assert.equal(client.authorized, true);
+      done();
+    });
+
     it('Already authenticated', function(done) {
       client
         .authenticate({
@@ -127,8 +168,13 @@ describe('Gateway', function() {
       });
     });
 
+    it('Authroize status should be false', function(done) {
+      assert.equal(client.authorized, false);
+      done();
+    });
+
     it('Props empty', function(done) {
-      assert.notStrictEqual(client.props, {});
+      assert.deepEqual(client.props, {});
       done();
     });
 

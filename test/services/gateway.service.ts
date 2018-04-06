@@ -23,13 +23,55 @@ import Bluebird = require('bluebird');
 })
 class Gateway extends BaseClass {
   created() {
-    this.on('CallEvent', (data, client, respond) => {
+    this.on('CallEvent', (client, data, respond) => {
       respond(null, data);
     });
 
-    this.on('EmitEvent', (data, client, respond) => {
+    this.on('CallEventError', (client, data, respond) => {
+      respond('Some error');
+    });
+
+    this.on('EmitEvent', (client, data, respond) => {
       this.send(client.id, 'EmitEvent', data);
     });
+
+    this.on('onBeforeEvent', (client, data, respond) => {
+      respond(null, data);
+    });
+
+    this.on('onAfterEvent', (client, data, respond) => {
+      respond(null, data);
+    });
+  }
+
+  @Method
+  onBeforeEvent(client, event, data) {
+    if (event === 'onBeforeEvent') {
+      this.logger.warn(data);
+      return {
+        wrong: 'data'
+      };
+    }
+
+    return data;
+  }
+
+  @Method
+  onAfterEvent(client, event, err, data) {
+    if (event === 'onAfterEvent') {
+      data['after'] = 'nice';
+    }
+
+    if (err) {
+      return Bluebird.reject(err);
+    }
+
+    return data;
+  }
+
+  @Action()
+  ErrorAction(ctx) {
+    return Bluebird.reject('Some error');
   }
 
   @Action()
