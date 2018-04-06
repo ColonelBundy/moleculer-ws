@@ -33,7 +33,7 @@ export enum PacketType {
   EVENT,
   ACTION,
   RESPONSE,
-  PROPS
+  SYNC
 }
 
 export interface Packet {
@@ -80,21 +80,15 @@ export interface Settings {
   };
 }
 
-export interface external_client_payload {
+export interface syncPacket {
   id: string;
+  authorized: boolean;
   props: moleculer.GenericObject;
 }
 
-export interface external_client_send {
+export interface externalSendPacket {
   id: string;
   packet: EventPacket;
-}
-
-// @TODO
-// * Convert to class
-// * add functions that when called gets executed on node where the client lives, eg: .emit/.call
-export interface external_client extends external_client_payload {
-  nodeID: string;
 }
 
 export interface callOptions {
@@ -135,15 +129,166 @@ export interface route {
 export type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 export type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 
+export class ExternalClient {
+  private readonly broker: moleculer.ServiceBroker;
+  public readonly id: string;
+  public readonly nodeID: string;
+  private _authorized: boolean = false;
+  private _props: moleculer.GenericObject = {};
+
+  constructor(
+    opts: syncPacket,
+    _nodeID: string,
+    _broker: moleculer.ServiceBroker
+  ) {
+    this.id = opts.id;
+    this._props = opts.props; // initial props
+    this._authorized = opts.authorized;
+    this.broker = _broker;
+    this.nodeID = _nodeID;
+  }
+
+  /**
+   * Set both props and authorized in one go.
+   *
+   * @param {moleculer.GenericObject} props
+   * @param {boolean} authorized
+   * @memberof Client
+   */
+  public SetProperties(props: moleculer.GenericObject, authorized: boolean) {
+    this._props = props;
+    this._authorized = authorized;
+    this.Sync();
+  }
+
+  /**
+   * Set authorized
+   *
+   * @memberof ExternalClient
+   */
+  public set authorized(value: boolean) {
+    this._authorized = value;
+    this.Sync();
+  }
+
+  /**
+   * Get authorized
+   *
+   * @type {boolean}
+   * @memberof ExternalClient
+   */
+  public get authorized(): boolean {
+    return this._authorized;
+  }
+
+  /**
+   * Set props
+   *
+   * @memberof Client
+   */
+  public set props(value: moleculer.GenericObject) {
+    this._props = value;
+    this.Sync();
+  }
+
+  /**
+   * Get Props
+   *
+   * @memberof Client
+   */
+  public get props(): moleculer.GenericObject {
+    return this._props;
+  }
+
+  /**
+   * Send to client on origin node
+   *
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
+   * @memberof ExternalClient
+   */
+  public send(event: string, data: moleculer.GenericObject): void {
+    this.broker.broadcast(
+      'ws.client.origin.send',
+      <externalSendPacket>{
+        id: this.id,
+        packet: {
+          data,
+          event
+        }
+      },
+      'ws'
+    );
+  }
+
+  /**
+   * Emit on origin node (send to all except client)
+   *
+   * @memberof ExternalClient
+   */
+  public emit(event: string, data: moleculer.GenericObject): void {
+    this.broker.broadcast(
+      'ws.client.origin.emit',
+      <externalSendPacket>{
+        id: this.id,
+        packet: {
+          data,
+          event
+        }
+      },
+      'ws'
+    );
+  }
+
+  /**
+   * Broadcaast on origin node (send to all on all nodes except client)
+   *
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
+   * @memberof ExternalClient
+   */
+  public broadcast(event: string, data: moleculer.GenericObject): void {
+    this.broker.broadcast(
+      'ws.client.origin.broadcast',
+      <externalSendPacket>{
+        id: this.id,
+        packet: {
+          data,
+          event
+        }
+      },
+      'ws'
+    );
+  }
+
+  /**
+   * Sync changes made here to origin
+   *
+   * @private
+   * @memberof ExternalClient
+   */
+  private Sync() {
+    this.broker.broadcast(
+      'ws.client.origin.sync',
+      <syncPacket>{
+        id: this.id,
+        props: this._props,
+        authorized: this._authorized
+      },
+      'ws'
+    );
+  }
+}
+
 export class Client {
   private readonly server: WSGateway;
   private logger: moleculer.LoggerInstance;
   public readonly id: string = shortid.generate();
   public readonly socket: uws;
-  public authorized: boolean = false;
   public alive: boolean = true;
-  public ack_id: 0;
+  private ack_id: number = 0;
   private _props: moleculer.GenericObject = {};
+  private _authorized: boolean = false;
 
   /**
    * Creates an instance of Client.
@@ -160,31 +305,46 @@ export class Client {
   }
 
   /**
-   * Set props
-   * Sync prop updates to all nodes, if you were to modify the object,
+   * Set both props and authorized in one go.
+   *
+   * @param {moleculer.GenericObject} props
+   * @param {boolean} authorized
+   * @memberof Client
+   */
+  public SetProperties(props: moleculer.GenericObject, authorized: boolean) {
+    this._props = props;
+    this._authorized = authorized;
+    this.Sync();
+  }
+
+  /**
+   * Set authorized
    *
    * @memberof Client
    */
-  public set props(value: any) {
-    this.server.broker.broadcast(
-      'ws.client.update',
-      {
-        id: this.id,
-        props: value
-      },
-      'ws'
-    );
+  public set authorized(value: boolean) {
+    this._authorized = value;
+    this.Sync();
+  }
 
-    // Send update to client as well.
-    if (this.socket.readyState === this.socket.OPEN) {
-      this.server
-        .EncodePacket({
-          payload: value,
-          type: PacketType.PROPS
-        })
-        .then(payload => this.socket.send(payload))
-        .catch(e => this.logger.error(e));
-    }
+  /**
+   * Get authorized
+   *
+   * @type {boolean}
+   * @memberof Client
+   */
+  public get authorized(): boolean {
+    return this._authorized;
+  }
+
+  /**
+   * Set props
+   *
+   * @memberof Client
+   */
+  public set props(value: moleculer.GenericObject) {
+    this._props = value;
+    this.Sync();
   }
 
   /**
@@ -192,8 +352,36 @@ export class Client {
    *
    * @memberof Client
    */
-  public get props() {
+  public get props(): moleculer.GenericObject {
     return this._props;
+  }
+
+  /**
+   * Broadcast change to all other nodes
+   *
+   * @private
+   * @memberof Client
+   */
+  private Sync() {
+    const packet: syncPacket = {
+      id: this.id,
+      props: this._props,
+      authorized: this._authorized
+    };
+
+    // Sync to client
+    if (this.socket.readyState === this.socket.OPEN) {
+      this.server
+        .EncodePacket({
+          payload: packet,
+          type: PacketType.SYNC
+        })
+        .then(payload => this.socket.send(payload))
+        .catch(e => this.logger.error(e));
+    }
+
+    // Sync to nodes
+    this.server.broker.broadcast('ws.client.sync', packet, 'ws');
   }
 
   /**
@@ -213,7 +401,7 @@ export class Client {
    * @returns {Bluebird<{}>}
    * @memberof Client
    */
-  public emit(event: string, data: object): Bluebird<{}> {
+  public send(event: string, data: object): Bluebird<{}> {
     return new Bluebird.Promise((resolve, reject) => {
       if (this.socket.readyState !== this.socket.OPEN) {
         reject(new Errors.SocketNotOpen());
@@ -226,6 +414,74 @@ export class Client {
         })
         .then(result => {
           this.socket.send(result);
+          resolve();
+        })
+        .catch(reject);
+    });
+  }
+
+  /**
+   * Send to all clients except sender on this node
+   *
+   * @param {string} event
+   * @param {object} data
+   * @returns {Bluebird<{}>}
+   * @memberof Client
+   */
+  public emit(event: string, data: object): Bluebird<{}> {
+    return new Bluebird.Promise((resolve, reject) => {
+      if (this.socket.readyState !== this.socket.OPEN) {
+        reject(new Errors.SocketNotOpen());
+      }
+
+      this.server
+        .EncodePacket({
+          payload: { event, data },
+          type: PacketType.EVENT
+        })
+        .then(result => {
+          this.server.clients
+            .filter(c => c.id !== this.id)
+            .map(c => c.socket.send(result));
+          resolve();
+        })
+        .catch(reject);
+    });
+  }
+
+  /**
+   * Send to all clients except sender on all nodes
+   *
+   * @param {string} event
+   * @param {moleculer.GenericObject} data
+   * @returns {Bluebird<{}>}
+   * @memberof Client
+   */
+  public broadcast(event: string, data: moleculer.GenericObject): Bluebird<{}> {
+    return new Bluebird.Promise((resolve, reject) => {
+      if (this.socket.readyState !== this.socket.OPEN) {
+        reject(new Errors.SocketNotOpen());
+      }
+
+      this.server
+        .EncodePacket({
+          payload: { event, data },
+          type: PacketType.EVENT
+        })
+        .then(result => {
+          this.logger.debug('Sending to all clients on all nodes');
+          this.server.broker.broadcast(
+            'ws.client.SendToAll',
+            <EventPacket>{
+              event,
+              data
+            },
+            'ws'
+          );
+
+          this.server.clients
+            .filter(c => c.id !== this.id)
+            .map(c => c.socket.send(result));
           resolve();
         })
         .catch(reject);
@@ -344,21 +600,17 @@ export class Client {
 
           // Server listener
           /* Works as: 
-              this.on('action_name', (data, client_id, respond) => {
+              this.on('action_name', (data, client, respond) => {
                 respond(error, data_to_respond_with) // to respond to this particular request.
                 this.emit(...) // to send to everyone on this node
                 this.broadcast(...) // to send to everyone on all nodes
-                this.send(client_id, ...) // to send to a client with client_id (will still send to the client if he's on another node)
+                this.send(client.id, ...) // to send to a client with id (will still send to the client if he's on another node)
               });
             */
           this.server.Emitter.emit(
             event,
             data,
-            {
-              id: this.id,
-              props: this.props,
-              authorized: this.authorized
-            },
+            this,
             this.ResponseCallback(data, _ack)
           ); // Add a callback function so we can allow a response
           _ack = -1; // Need to reset here so we don't send multiple responses
@@ -437,11 +689,7 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client: {
-        id: string;
-        props: moleculer.GenericObject;
-        authorized: boolean;
-      },
+      client: Client,
       respond: (error: string, data?: any) => void
     ) => void
   ) => void;
@@ -449,11 +697,7 @@ export class BaseClass extends BaseSchema {
     event: string,
     callback: (
       data: any,
-      client: {
-        id: string;
-        props: moleculer.GenericObject;
-        authorized: boolean;
-      },
+      client: Client,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -462,11 +706,7 @@ export class BaseClass extends BaseSchema {
     timesTolisten: number,
     callback: (
       data: any,
-      client: {
-        id: string;
-        props: moleculer.GenericObject;
-        authorized: boolean;
-      },
+      client: Client,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -515,7 +755,7 @@ export class WSGateway {
   public setMaxListeners: EventEmitter2['setMaxListeners'];
 
   public clients: Client[] = []; // List of clients connected to this node
-  public clients_external: external_client[] = []; // Replicated list of clients on other nodes
+  public clients_external: ExternalClient[] = []; // Replicated list of clients on other nodes
   private isHTTPS: boolean = false;
   private server: uws.Server;
   private webServer: http.Server | https.Server;
@@ -671,7 +911,7 @@ export class WSGateway {
   }
 
   /**
-   * Send to a specific client with id
+   * Send to a client with id
    *
    * @param {string} id
    * @param {string} event
@@ -690,7 +930,7 @@ export class WSGateway {
 
     if (client) {
       this.logger.debug(`Sending to a client with id: ${id}`);
-      client.emit(event, data);
+      client.send(event, data);
       return;
     }
 
@@ -705,14 +945,8 @@ export class WSGateway {
       this.logger.debug(
         `Sending to a client with id: ${id} on node ${external.nodeID}`
       );
-      this.broker.emit(
-        'ws.client.send',
-        <EventPacket>{
-          event,
-          data
-        },
-        external.nodeID
-      );
+
+      external.send(event, data);
     }
   }
 
@@ -747,7 +981,6 @@ export class WSGateway {
       },
       'ws'
     );
-
     this.emit(event, data);
   }
 
@@ -765,13 +998,10 @@ export class WSGateway {
         // Not alive since last ping
         u.Close(); // Close connection (if there's one)
 
+        // Let other nodes know user disconnected
         this.broker.broadcast(
           'ws.client.disconnected',
-          <external_client>{
-            // Let other nodes know user disconnected
-            id: u.id,
-            props: u.props
-          },
+          <ExternalClient>{},
           'ws'
         );
 
@@ -810,6 +1040,8 @@ export class WSGateway {
       },
       'ws'
     );
+
+    this.Emitter.emit('connection', client);
   }
 
   /**
@@ -1138,51 +1370,48 @@ export class WSGateway {
   /**
    * Client connected on another node
    *
-   * @param {external_client_payload} payload
+   * @param {syncPacket} payload
    * @param {any} sender
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
-  private 'ws.client.connected'(payload: external_client_payload, sender) {
+  private 'ws.client.connected'(payload: syncPacket, sender) {
     if (sender === this.broker.nodeID) {
       return;
     }
 
     this.logger.debug(`Client: ${payload.id} connected on node: ${sender}`);
 
-    const opts = { nodeID: sender, ...payload };
+    const opts = new ExternalClient(payload, sender, this.broker);
     this.clients_external.push(opts);
 
-    this.Emitter.emit('connected_external', opts);
+    this.Emitter.emit('connection', opts);
   }
 
   /**
    * Client disconnected on another node
    *
-   * @param {external_client_payload} payload
+   * @param {syncPacket} payload
    * @param {any} sender
    * @memberof WSGateway
    */
   @Event({
     group: 'ws'
   })
-  private 'ws.client.disconnected'(payload: external_client_payload, sender) {
+  private 'ws.client.disconnected'(payload: syncPacket, sender) {
     if (sender === this.broker.nodeID) {
       return;
     }
     this.logger.debug(`Client: ${payload.id} disconnected on node: ${sender}`);
 
     const opts = { nodeID: sender, ...payload };
-    this.clients_external.splice(
-      this.clients_external.findIndex(
-        c => c.nodeID === sender && c.id === payload.id
-      ),
-      1
+    this.clients_external = this.clients_external.filter(
+      c => c.id !== payload.id
     );
 
-    this.Emitter.emit('disconnected_external', opts);
+    this.Emitter.emit('disconnected', opts);
   }
 
   /**
@@ -1208,7 +1437,7 @@ export class WSGateway {
    * Let other nodes send to a client on this server
    *
    * @private
-   * @param {external_client_send} payload
+   * @param {externalSendPacket} payload
    * @param {any} sender
    * @returns
    * @memberof WSGateway
@@ -1216,7 +1445,7 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.send'(payload: external_client_send, sender) {
+  private 'ws.client.send'(payload: externalSendPacket, sender) {
     const id = payload.id,
       packet: EventPacket = payload.packet;
 
@@ -1226,10 +1455,10 @@ export class WSGateway {
   }
 
   /**
-   * Sync props
+   * Sync client properties
    *
    * @private
-   * @param {external_client_payload} payload
+   * @param {syncPacket} payload
    * @param {any} sender
    * @returns
    * @memberof WSGateway
@@ -1237,12 +1466,111 @@ export class WSGateway {
   @Event({
     group: 'ws'
   })
-  private 'ws.client.update'(payload: external_client_payload, sender) {
+  private 'ws.client.sync'(payload: syncPacket, sender) {
     if (sender === this.broker.nodeID) {
       return;
     }
-    this.logger.debug(`Client ${payload.id} updated props`);
-    this.clients_external.find(c => c.id === payload.id).props = payload.props;
+    this.logger.debug(`Client ${payload.id} SYNC`);
+    const client = this.clients_external.find(c => c.id === payload.id);
+    client.SetProperties(payload.props, payload.authorized);
+  }
+
+  /**
+   * Handler for External client on another node -> .emit -> to client origin node -> .emit
+   *
+   * @private
+   * @param {externalSendPacket} payload
+   * @param {any} sender
+   * @returns
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  private 'ws.client.origin.emit'(payload: externalSendPacket, sender) {
+    const client = this.clients.find(c => c.id === payload.id);
+    if (sender === this.broker.nodeID || !client) {
+      return;
+    }
+
+    this.logger.debug(
+      `[ORIGIN] Emitting to everyone except ${
+        payload.id
+      } by external from ${sender}`
+    );
+    client.emit(payload.packet.event, payload.packet.data);
+  }
+
+  /**
+   * Handler for External client on another node -> .broadcast -> to client origin node -> .broadcast
+   *
+   * @private
+   * @param {externalSendPacket} payload
+   * @param {any} sender
+   * @returns
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  private 'ws.client.origin.broadcast'(payload: externalSendPacket, sender) {
+    const client = this.clients.find(c => c.id === payload.id);
+    if (sender === this.broker.nodeID || !client) {
+      return;
+    }
+
+    this.logger.debug(
+      `[ORIGIN] Broadcasting to everyone except client ${
+        payload.id
+      } by external from ${sender}`
+    );
+    client.broadcast(payload.packet.event, payload.packet.data);
+  }
+
+  /**
+   * Handler for External client on another node -> .send -> to client origin node -> .send
+   *
+   * @private
+   * @param {externalSendPacket} payload
+   * @param {any} sender
+   * @returns
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  private 'ws.client.origin.send'(payload: externalSendPacket, sender) {
+    const client = this.clients.find(c => c.id === payload.id);
+    if (sender === this.broker.nodeID || !client) {
+      return;
+    }
+
+    this.logger.debug(
+      `[ORIGIN] Sending to client ${payload.id} by external from ${sender}`
+    );
+    client.send(payload.packet.event, payload.packet.data);
+  }
+
+  /**
+   * Handler for External client on another node setting props
+   *
+   * @private
+   * @param {syncPacket} payload
+   * @param {any} sender
+   * @returns
+   * @memberof WSGateway
+   */
+  @Event({
+    group: 'ws'
+  })
+  private 'ws.client.origin.sync'(payload: syncPacket, sender) {
+    const client = this.clients.find(c => c.id === payload.id);
+    if (sender === this.broker.nodeID || !client) {
+      return;
+    }
+
+    this.logger.debug(`[ORIGIN] Client ${payload.id} SYNC`);
+    client.SetProperties(payload.props, payload.authorized);
   }
 
   /**
