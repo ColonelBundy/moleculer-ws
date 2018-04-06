@@ -628,9 +628,7 @@ export class Client {
           return Bluebird.resolve();
         }
 
-        return Bluebird.reject(
-          new Errors.StraightError('Malformed packet')
-        ); // Should never reach here unless type is undefined
+        return Bluebird.reject(new Errors.StraightError('Malformed packet')); // Should never reach here unless type is undefined
       })
       .then(response => {
         if (_ack > -1) {
@@ -1126,8 +1124,7 @@ export class WSGateway {
           _.isFunction(this.settings.encryption) &&
           _.isFunction(this.settings.decryption)
         ) {
-          this.settings
-            .decryption(message)
+          Bluebird.method(this.settings.decryption).call(this, message)
             .then(resolve)
             .catch(e => new Errors.DecodeError(e));
           return;
@@ -1145,6 +1142,11 @@ export class WSGateway {
         }
       } catch (e) {
         this.logger.fatal(e);
+
+        if (e instanceof Errors.DecodeError) {
+          return reject(e);
+        }
+
         reject(new Errors.DecodeError());
       }
     });
@@ -1165,8 +1167,7 @@ export class WSGateway {
           _.isFunction(this.settings.encryption) &&
           _.isFunction(this.settings.decryption)
         ) {
-          this.settings
-            .encryption(packet)
+          Bluebird.method(this.settings.encryption).call(this, packet)
             .then(resolve)
             .catch(e => new Errors.EncodeError(e));
           return;
@@ -1185,10 +1186,7 @@ export class WSGateway {
       } catch (e) {
         this.logger.fatal(e);
 
-        if (
-          e instanceof Errors.EncodeError ||
-          e instanceof Errors.DecodeError
-        ) {
+        if (e instanceof Errors.EncodeError) {
           return reject(e);
         }
 
