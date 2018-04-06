@@ -595,7 +595,7 @@ export class Client {
 
           // Server listener
           /* Works as: 
-              this.on('action_name', (data, client, respond) => {
+              this.on('action_name', (client, data, respond) => {
                 respond(error, data_to_respond_with) // to respond to this particular request.
                 this.emit(...) // to send to everyone on this node
                 this.broadcast(...) // to send to everyone on all nodes
@@ -604,8 +604,8 @@ export class Client {
             */
           this.server.Emitter.emit(
             event,
-            data,
             this,
+            data,
             this.ResponseCallback(data, _ack)
           ); // Add a callback function so we can allow a response
           _ack = -1; // Need to reset here so we don't send multiple responses
@@ -683,16 +683,16 @@ export class BaseClass extends BaseSchema {
   public on: (
     event: string,
     callback: (
-      data: any,
       client: Client,
+      data: any,
       respond: (error: string, data?: any) => void
     ) => void
   ) => void;
   public once: (
     event: string,
     callback: (
-      data: any,
       client: Client,
+      data: any,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -700,8 +700,8 @@ export class BaseClass extends BaseSchema {
     event: string,
     timesTolisten: number,
     callback: (
-      data: any,
       client: Client,
+      data: any,
       respond: (error: string, data: any) => void
     ) => void
   ) => void;
@@ -1050,15 +1050,20 @@ export class WSGateway {
 
     this.logger.debug(`Client: ${client.id} disconnected`);
 
+    const { id, props, authorized } = client;
+
     // Let other nodes know this client has disconnected
     this.broker.broadcast(
       'ws.client.disconnected',
-      {
-        id: client.id,
-        props: client.props
+      <syncPacket>{
+        id,
+        props,
+        authorized
       },
       'ws'
     );
+
+    this.Emitter.emit('disconnect', { id, props, authorized });
   }
 
   /**
@@ -1380,8 +1385,6 @@ export class WSGateway {
 
     const opts = new ExternalClient(payload, sender, this.broker);
     this.clients_external.push(opts);
-
-    this.Emitter.emit('connection', opts);
   }
 
   /**
@@ -1404,8 +1407,6 @@ export class WSGateway {
     this.clients_external = this.clients_external.filter(
       c => c.id !== payload.id
     );
-
-    this.Emitter.emit('disconnected', opts);
   }
 
   /**
