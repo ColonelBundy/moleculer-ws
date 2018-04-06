@@ -28,7 +28,7 @@ export enum PacketType {
 export interface Packet {
   ack?: number; // Should be set by client if he wants a response
   type: PacketType;
-  payload: ActionPacket | EventPacket | ResponsePacket | object;
+  payload: ActionPacket | EventPacket | ResponsePacket | syncPacket;
 }
 
 export interface ActionPacket {
