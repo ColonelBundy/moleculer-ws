@@ -17,7 +17,15 @@ import Bluebird = require('bluebird');
     path: '/',
     routes: [
       <route>{
-        name: 'test'
+        name: 'test',
+        onError(client: Client, request: Request, error: Error) {
+          if (
+            request.action === 'Gateway.ErrorAction' &&
+            request.params['onError']
+          ) {
+            return 'success';
+          }
+        }
       }
     ]
   }
@@ -77,7 +85,7 @@ class Gateway extends BaseClass {
 
   @Method
   onError(client: Client, error: Error) {
-    return Bluebird.resolve(error);
+    return error;
   }
 
   @Action()

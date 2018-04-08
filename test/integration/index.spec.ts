@@ -51,6 +51,13 @@ describe('Gateway', function() {
       });
     });
 
+    it('call action with error and onError handler', function(done) {
+      client.call('test', 'Gateway.ErrorAction', { onError: true }).catch(e => {
+        assert.equal(e, 'success');
+        done();
+      });
+    });
+
     it('call action not found', function(done) {
       client.call('test', 'Gateway.notfound', payload).catch(e => {
         assert.equal(e, 'Service currently not available');

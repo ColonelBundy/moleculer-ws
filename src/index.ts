@@ -113,7 +113,7 @@ export interface route {
     req: Request
   ): Bluebird<moleculer.Context | moleculer.GenericObject>;
   callOptions?: callOptions;
-  onError?(req, res, err): void;
+  onError?(client: Client, request: Request, error: Error): void;
 }
 
 export type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
@@ -632,7 +632,9 @@ export class Client {
         if (_ack > -1) {
           return Bluebird.try(() => {
             if (_.isFunction(this.server.onError)) {
-              return Bluebird.method(this.server.onError).call(this, this, err);
+              return Bluebird.method(this.server.onError)
+                .call(this, this, err)
+                .catch(e => Bluebird.resolve(e));
             }
 
             return err;
@@ -1310,93 +1312,116 @@ export class WSGateway {
     params: moleculer.ActionParams
   ): Bluebird<any> {
     return new Bluebird((resolve, reject) => {
-      let ctx: moleculer.Context;
+      let ctx: moleculer.Context, endpoint: any, route: route, action: string;
 
       this.FindRoute(name, _action)
         .then(({ route, action }) => {
-          // client needs to authorize
-          if (route.authorization && !client.authorized) {
-            reject(new Errors.NotAuthorized());
-          }
+          return Bluebird.try(() => {
+            // client needs to authorize
+            if (route.authorization && !client.authorized) {
+              return Bluebird.reject(new Errors.NotAuthorized());
+            }
 
-          this.logger.debug(`Finding endpoint for: ${action}`);
-          const endpoint: any = this.broker.findNextActionEndpoint(action);
+            this.logger.debug(`Finding endpoint for: ${action}`);
+            endpoint = this.broker.findNextActionEndpoint(action);
 
-          if (endpoint instanceof moleculer.Errors.ServiceNotFoundError) {
-            return reject(new Errors.EndpointNotAvailable());
-          }
+            if (endpoint instanceof moleculer.Errors.ServiceNotFoundError) {
+              return Bluebird.reject(new Errors.EndpointNotAvailable());
+            }
 
-          // Credits Icebob
-          // Action is not publishable
-          if (endpoint.action && endpoint.action.publish === false) {
-            return reject(new Errors.RouteNotFound());
-          }
+            // Credits Icebob
+            // Action is not publishable
+            if (endpoint.action && endpoint.action.publish === false) {
+              return Bluebird.reject(new Errors.RouteNotFound());
+            }
 
-          ctx = moleculer.Context.create(
-            this.broker,
-            { name: this.name, handler: _.noop },
-            this.broker.nodeID,
-            params,
-            {}
-          );
-          (ctx as any)._metricStart(ctx.metrics);
+            ctx = moleculer.Context.create(
+              this.broker,
+              { name: this.name, handler: _.noop },
+              this.broker.nodeID,
+              params,
+              {}
+            );
+            (ctx as any)._metricStart(ctx.metrics);
 
-          ctx.meta.client = {
-            id: client.id,
-            props: client.props,
-            authorized: client.authorized
-          };
+            ctx.meta.client = {
+              id: client.id,
+              props: client.props,
+              authorized: client.authorized
+            };
 
-          if (route.onBeforeCall) {
-            // In beforecall you can modify the params, the context and client props.
-            Bluebird.resolve(
-              route.onBeforeCall.call(this, ctx, <Request>{
-                name,
-                action,
-                params
-              })
-            )
-              .then(result => {
-                if (result) {
-                  // Override anything if the beforeCall returns them.
-                  // Apply context
-                  if (result.ctx) ctx = result.ctx;
+            if (_.isFunction(route.onBeforeCall)) {
+              // In beforecall you can modify the params, the context and client props.
+              return Bluebird.method(route.onBeforeCall)
+                .call(this, ctx, <Request>{
+                  name,
+                  action,
+                  params
+                })
+                .then(result => {
+                  if (result) {
+                    // Override anything if the beforeCall returns them.
+                    // Apply context
+                    if (result.ctx) ctx = result.ctx;
 
-                  // Apply params
-                  if (result.params) params = result.params;
-                }
-              })
-              .catch(reject);
-          }
+                    // Apply params
+                    if (result.params) params = result.params;
+                  }
 
-          return ctx
-            .call(endpoint, params, route.callOptions || {})
-            .then(res => {
-              // In aftercall you can modify the result.
-              if (route.onAfterCall) {
-                Bluebird.resolve(
-                  route.onAfterCall.call(
+                  return Bluebird.resolve();
+                });
+            }
+          })
+            .then(() => {
+              return ctx
+                .call(endpoint, params, route.callOptions || {})
+                .then(res => {
+                  // In aftercall you can modify the result.
+                  if (_.isFunction(route.onAfterCall)) {
+                    return Bluebird.method(route.onAfterCall).call(
+                      this,
+                      ctx,
+                      <Request>{
+                        name,
+                        action,
+                        params
+                      },
+                      res
+                    );
+                  }
+
+                  return Bluebird.resolve(res);
+                });
+            })
+            .catch(err => {
+              if (_.isFunction(route.onError)) {
+                // onError has to reject regardless
+                return Bluebird.method(route.onError)
+                  .call(
                     this,
-                    ctx,
+                    client,
                     <Request>{
                       name,
                       action,
                       params
                     },
-                    res
+                    err
                   )
-                )
-                  .then(result => {
-                    // Apply result
-                    if (result) res = result;
-                  })
-                  .catch(reject);
+                  .then(e => {
+                    if (!e) {
+                      return Bluebird.reject(err);
+                    }
+
+                    return Bluebird.reject(e);
+                  });
               }
 
-              (ctx as any)._metricFinish(null, ctx.metrics);
-              resolve(res);
-            })
-            .catch(reject);
+              return Bluebird.reject(err);
+            });
+        })
+        .then(result => {
+          (ctx as any)._metricFinish(null, ctx.metrics);
+          return resolve(result);
         })
         .catch(err => {
           if (!err) return;
