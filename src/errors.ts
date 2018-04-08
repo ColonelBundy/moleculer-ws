@@ -52,10 +52,8 @@ export class StraightError extends Error {
   }
 }
 
-export class ClientError {
-  constructor(error) {
-    return {
-      error
-    };
+export class ClientError extends Error {
+  constructor(message) {
+    super(message);
   }
 }

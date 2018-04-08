@@ -5,7 +5,8 @@ import {
   Settings,
   route,
   Request,
-  BaseClass
+  BaseClass,
+  Client
 } from '../../src/index';
 import Bluebird = require('bluebird');
 
@@ -57,7 +58,12 @@ class Gateway extends BaseClass {
   }
 
   @Method
-  onAfterEvent(client, event, err, data) {
+  onAfterEvent(
+    client: Client,
+    event: string,
+    err: string,
+    data: moleculer.GenericObject
+  ) {
     if (event === 'onAfterEvent') {
       data['after'] = 'nice';
     }
@@ -69,36 +75,41 @@ class Gateway extends BaseClass {
     return data;
   }
 
+  @Method
+  onError(client: Client, error: Error) {
+    return Bluebird.resolve(error);
+  }
+
   @Action()
-  ErrorAction(ctx) {
+  ErrorAction(ctx: moleculer.Context) {
     return Bluebird.reject('Some error');
   }
 
   @Action()
-  EchoParams(ctx) {
+  EchoParams(ctx: moleculer.Context) {
     return Bluebird.resolve(ctx.params);
   }
 
   @Action()
-  EmitAction(ctx) {
+  EmitAction(ctx: moleculer.Context) {
     this.send(ctx.meta.client.id, 'EmitAction', ctx.params);
     return Bluebird.resolve();
   }
 
   @Method
-  authorize(client, params) {
+  authorize(client: Client, params: moleculer.GenericObject) {
     if (params.username == 'test' && params.password == 'test') {
       client.props.username = 'test'; // set client prop
-      return Bluebird.Promise.resolve();
+      return Bluebird.resolve();
     }
 
-    return Bluebird.Promise.reject('Invalid login');
+    return Bluebird.reject('Invalid login');
   }
 
   @Method
-  deauthorize(client, params) {
+  deauthorize(client: Client, params: moleculer.GenericObject) {
     client.props = {};
-    return Bluebird.Promise.resolve('Done');
+    return Bluebird.resolve('Done');
   }
 }
 

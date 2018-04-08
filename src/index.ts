@@ -628,41 +628,35 @@ export class Client {
           return this.SendResponse(response, _ack);
         }
       })
-      .catch(e => {
-        this.logger.error(e);
+      .catch(err => {
         if (_ack > -1) {
-          let error = new Errors.ClientError('Unexpected error');
+          return Bluebird.try(() => {
+            if (_.isFunction(this.server.onError)) {
+              return Bluebird.method(this.server.onError).call(this, this, err);
+            }
 
-          if (e instanceof Errors.RouteNotFound) {
-            error = new Errors.ClientError('Route not found');
-          } else if (e instanceof Errors.EndpointNotAvailable) {
-            error = new Errors.ClientError('Service currently not available');
-          } else if (e instanceof Errors.DecodeError) {
-            error = new Errors.ClientError('Malformed packet');
-          } else if (e instanceof Errors.EncodeError) {
-            error = new Errors.ClientError('Internal Server Error');
-          } else if (
-            e instanceof Errors.StraightError ||
-            e instanceof moleculer.Errors.MoleculerError
-          ) {
-            error = new Errors.ClientError(e.message);
-          }
+            return err;
+          }).then((e: Error) => {
+            this.logger.error(e);
+            let error = new Errors.ClientError('Unexpected error');
 
-          return Bluebird.resolve()
-            .then(() => {
-              if (_.isFunction(this.server.onError)) {
-                return Bluebird.method(this.server.onError).call(
-                  this,
-                  this,
-                  error
-                );
-              }
+            if (e instanceof Errors.RouteNotFound) {
+              error.message = 'Route not found';
+            } else if (e instanceof Errors.EndpointNotAvailable) {
+              error.message = 'Service currently not available';
+            } else if (e instanceof Errors.DecodeError) {
+              error.message = 'Malformed packet';
+            } else if (e instanceof Errors.EncodeError) {
+              error.message = 'Internal Server Error';
+            } else if (e instanceof Error) {
+              error.message = e.message;
+            } else if (!(<any>e instanceof Error)) {
+              // Not error, could be string, obj etc..
+              error.message = e;
+            }
 
-              return error;
-            })
-            .then((error: moleculer.GenericObject) => {
-              return this.SendResponse(error, _ack);
-            });
+            return this.SendResponse({ error: error.message }, _ack);
+          });
         }
       })
       .catch(e => {
