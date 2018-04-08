@@ -876,15 +876,18 @@ export class WSGateway {
    */
   stopped() {
     if (this.webServer.listening) {
-      Bluebird.all([
-        Bluebird.promisify(this.server.close),
-        Bluebird.promisify(this.webServer.close)
-      ])
-        .then(() => {
-          if (this.heartbeatEnabled) this.heartbeatTimer.clearInterval();
-          this.logger.info('WS Gateway stopped!');
-        })
-        .catch(e => this.logger.error('WS Gateway close error!', e));
+      try {
+        this.webServer.close();
+        this.server.close();
+
+        if (this.heartbeatEnabled) {
+          this.heartbeatTimer.clearInterval();
+        }
+
+        this.logger.info('WS Gateway stopped!');
+      } catch (e) {
+        this.logger.error('WS Gateway close error!', e);
+      }
     }
   }
 
