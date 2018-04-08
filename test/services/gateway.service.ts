@@ -6,7 +6,8 @@ import {
   route,
   Request,
   BaseClass,
-  Client
+  Client,
+  ExternalClient
 } from '../../src/index';
 import Bluebird = require('bluebird');
 

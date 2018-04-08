@@ -116,6 +116,16 @@ export interface route {
   onError?(client: Client, request: Request, error: Error): void;
 }
 
+export interface ExternalClientMeta {
+  client: syncPacket;
+}
+
+export interface ExternalClientStruct {
+  meta: ExternalClientMeta;
+  callerNodeID: string;
+  broker: moleculer.ServiceBroker;
+}
+
 export type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
 export type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
 
@@ -126,16 +136,12 @@ export class ExternalClient {
   private _authorized: boolean = false;
   private _props: moleculer.GenericObject = {};
 
-  constructor(
-    opts: syncPacket,
-    _nodeID: string,
-    _broker: moleculer.ServiceBroker
-  ) {
-    this.id = opts.id;
-    this._props = opts.props; // initial props
-    this._authorized = opts.authorized;
-    this.broker = _broker;
-    this.nodeID = _nodeID;
+  constructor(ctx: ExternalClientStruct | moleculer.Context) {
+    this.id = (<ExternalClientMeta>ctx.meta).client.id;
+    this._props = (<ExternalClientMeta>ctx.meta).client.props; // initial props
+    this._authorized = (<ExternalClientMeta>ctx.meta).client.authorized;
+    this.broker = ctx.broker;
+    this.nodeID = ctx.callerNodeID;
   }
 
   /**
@@ -946,7 +952,7 @@ export class WSGateway {
    * @param {string} id
    * @param {string} event
    * @param {moleculer.GenericObject} data
-   * @param {boolean} [isExternal] is only applied when its coming from an external node to prevent a race condition which shouldn't exist.
+   * @param {boolean} [fromExternal] is only applied when its coming from an external node to prevent a race condition which shouldn't exist.
    * @memberof WSGateway
    */
   @Method
@@ -954,7 +960,7 @@ export class WSGateway {
     id: string,
     event: string,
     data: moleculer.GenericObject,
-    isExternal?: boolean
+    fromExternal?: boolean
   ): void {
     const client: Client = this.clients.find(c => c.id === id);
 
@@ -964,7 +970,7 @@ export class WSGateway {
       return;
     }
 
-    if (!isExternal) {
+    if (!fromExternal) {
       const external = this.clients_external.find(c => c.id === id);
 
       if (!external) {
@@ -1452,7 +1458,11 @@ export class WSGateway {
 
     this.logger.debug(`Client: ${payload.id} connected on node: ${sender}`);
 
-    const opts = new ExternalClient(payload, sender, this.broker);
+    const opts = new ExternalClient(<ExternalClientStruct>{
+      broker: this.broker,
+      callerNodeID: sender,
+      meta: <ExternalClientMeta>{ client: payload }
+    });
     this.clients_external.push(opts);
   }
 
