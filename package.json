@@ -11,7 +11,7 @@
     "runner": "yarn clean && tsc && moleculer-runner --repl --config dist/src/testing/moleculer.dev.config.js dist/src/testing/services",
     "debug": "yarn clean && tsc && node --inspect dist/src/index.js",
     "test": "mocha -r ts-node/register test/**/*.spec.ts",
-    "release": "yarn clean && tsc && yarn test && typedoc ./docs ./src"
+    "release": "yarn clean && tsc && yarn test && typedoc --theme minimal --out ./docs ./src"
   },
   "engines": {
     "node": ">=8.9.1"
