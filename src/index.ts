@@ -833,7 +833,7 @@ export class WSGateway {
       );
       this.isHTTPS = true;
     } else {
-      this.webServer = http.createServer(this.httphandler);
+      this.webServer = uws.http.createServer(this.httphandler);
     }
 
     this.server = new uws.Server({
