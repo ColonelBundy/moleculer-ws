@@ -60,8 +60,8 @@ export interface Settings {
     maxListeners: number;
   };
   perMessageDeflate?: boolean;
-  encryption?: 'Binary' | 'JSON' | encryption;
-  decryption?: decryption;
+  serialize?: 'Binary' | 'JSON' | serialize;
+  deserialize?: deserialize;
   path: string;
   routes?: route[];
   https?: {
@@ -126,8 +126,8 @@ export interface ExternalClientStruct {
   broker: moleculer.ServiceBroker;
 }
 
-export type encryption = (packet: Packet) => Bluebird<Buffer | string | any>;
-export type decryption = (message: Buffer | string | any) => Bluebird<Packet>;
+export type serialize = (packet: Packet) => Bluebird<Buffer | string | any>;
+export type deserialize = (message: Buffer | string | any) => Bluebird<Packet>;
 
 export class ExternalClient {
   private readonly broker: moleculer.ServiceBroker;
@@ -770,7 +770,7 @@ export class WSGateway {
     ip: process.env.IP || '0.0.0.0',
     perMessageDeflate: false,
     path: '/',
-    encryption: 'Binary',
+    serialize: 'Binary',
     routes: [],
     heartbeat: {
       enabled: true,
@@ -1122,17 +1122,17 @@ export class WSGateway {
     return new Bluebird((resolve, reject) => {
       try {
         if (
-          _.isFunction(this.settings.encryption) &&
-          _.isFunction(this.settings.decryption)
+          _.isFunction(this.settings.serialize) &&
+          _.isFunction(this.settings.deserialize)
         ) {
-          Bluebird.method(this.settings.decryption)
+          Bluebird.method(this.settings.deserialize)
             .call(this, message)
             .then(resolve)
             .catch(e => new Errors.DecodeError(e));
           return;
         }
 
-        switch (this.settings.encryption) {
+        switch (this.settings.serialize) {
           case 'JSON':
             resolve(JSON.parse(message));
             break;
@@ -1166,17 +1166,17 @@ export class WSGateway {
     return new Bluebird((resolve, reject) => {
       try {
         if (
-          _.isFunction(this.settings.encryption) &&
-          _.isFunction(this.settings.decryption)
+          _.isFunction(this.settings.serialize) &&
+          _.isFunction(this.settings.deserialize)
         ) {
-          Bluebird.method(this.settings.encryption)
+          Bluebird.method(this.settings.serialize)
             .call(this, packet)
             .then(resolve)
             .catch(e => new Errors.EncodeError(e));
           return;
         }
 
-        switch (this.settings.encryption) {
+        switch (this.settings.serialize) {
           case 'JSON':
             resolve(JSON.stringify(packet));
             break;
